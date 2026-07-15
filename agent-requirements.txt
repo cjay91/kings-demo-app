@@ -1,0 +1,4 @@
+livekit-agents==1.6.5
+livekit-plugins-google==1.6.5
+livekit-plugins-silero==1.6.5
+python-dotenv==1.2.2

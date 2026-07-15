@@ -1,0 +1,14 @@
+# These are only needed for the LiveKit agent worker, which does NOT run on
+# Vercel (see README) — keep them out of the Vercel deployment entirely so
+# their presence can't affect what Vercel bundles/builds for api/.
+agent.py
+agent-requirements.txt
+db.py
+tools.py
+seed.py
+token_server.py
+hospital.db
+.venv/
+__pycache__/
+Dockerfile
+livekit.toml

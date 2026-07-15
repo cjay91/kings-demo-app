@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>King's Hospital Voice Bot — Sample</title>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 640px;
+      margin: 40px auto;
+      padding: 0 16px;
+      color: #1a1a1a;
+    }
+    h1 { font-size: 1.3rem; }
+    button {
+      font-size: 1rem;
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    #connectBtn { background: #1a7f37; color: white; }
+    #disconnectBtn { background: #b91c1c; color: white; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #status { margin: 16px 0; font-weight: 600; }
+    #transcript {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 12px;
+      height: 320px;
+      overflow-y: auto;
+      background: #fafafa;
+    }
+    .line { margin-bottom: 8px; }
+    .patient { color: #0b5cab; }
+    .agent { color: #1a7f37; }
+  </style>
+</head>
+<body>
+  <h1>King's Hospital Voice Bot — Sample (Sinhala)</h1>
+  <p>Click connect, allow microphone access, then speak in Sinhala.</p>
+
+  <button id="connectBtn">Connect</button>
+  <button id="disconnectBtn" disabled>Disconnect</button>
+
+  <div id="status">Disconnected</div>
+  <div id="transcript"></div>
+
+  <script>
+    // Local dev serves this file statically (see README) and runs
+    // token_server.py separately on :8080. Once deployed on Vercel, this
+    // same file is served from the same origin as /api/livekit_token, so a
+    // relative path is used instead.
+    const isLocalDev = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+    const TOKEN_SERVER_URL = isLocalDev
+      ? "http://localhost:8080/token"
+      : "/api/livekit_token";
+
+    const connectBtn = document.getElementById("connectBtn");
+    const disconnectBtn = document.getElementById("disconnectBtn");
+    const statusEl = document.getElementById("status");
+    const transcriptEl = document.getElementById("transcript");
+
+    let room = null;
+
+    function addLine(speaker, text) {
+      const div = document.createElement("div");
+      div.className = "line " + speaker;
+      div.textContent = (speaker === "patient" ? "🧑 You: " : "🤖 Agent: ") + text;
+      transcriptEl.appendChild(div);
+      transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    }
+
+    async function connect() {
+      connectBtn.disabled = true;
+      statusEl.textContent = "Requesting token...";
+
+      const res = await fetch(TOKEN_SERVER_URL);
+      const { token, url } = await res.json();
+
+      room = new LivekitClient.Room();
+
+      room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === "audio") {
+          const el = track.attach();
+          document.body.appendChild(el);
+        }
+      });
+
+      room.on(LivekitClient.RoomEvent.TranscriptionReceived, (segments, participant) => {
+        const isPatient = participant?.identity?.startsWith("patient") ?? true;
+        for (const seg of segments) {
+          if (!seg.final) continue;
+          addLine(isPatient ? "patient" : "agent", seg.text);
+        }
+      });
+
+      room.on(LivekitClient.RoomEvent.Disconnected, () => {
+        statusEl.textContent = "Disconnected";
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+      });
+
+      await room.connect(url, token);
+      await room.localParticipant.setMicrophoneEnabled(true);
+
+      statusEl.textContent = "Connected — speak in Sinhala";
+      disconnectBtn.disabled = false;
+    }
+
+    async function disconnect() {
+      if (room) {
+        await room.disconnect();
+        room = null;
+      }
+    }
+
+    connectBtn.addEventListener("click", () => connect().catch((e) => {
+      statusEl.textContent = "Error: " + e.message;
+      connectBtn.disabled = false;
+    }));
+    disconnectBtn.addEventListener("click", disconnect);
+  </script>
+</body>
+</html>
