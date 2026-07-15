@@ -3,6 +3,7 @@
 # their presence can't affect what Vercel bundles/builds for api/.
 agent.py
 agent-requirements.txt
+dev-requirements.txt
 db.py
 tools.py
 seed.py
