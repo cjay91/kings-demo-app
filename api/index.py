@@ -15,6 +15,14 @@ work either. Rather than depend on that precedence again, this app serves
 "/" itself, reading public/index.html directly — no ambiguity, no reliance
 on undocumented routing behavior.
 
+That file isn't reachable via any Python import, so Vercel's bundler didn't
+include it in the function's deployment automatically (confirmed via a live
+FileNotFoundError at /var/task/public/index.html) — vercel.json's
+`functions["api/*.py"].includeFiles` glob forces it in. If that ever stops
+working (Vercel bundling behavior has proven inconsistent across attempts
+on this project), the error below is written to say exactly what path(s)
+were tried, rather than an opaque 500.
+
 Reads LIVEKIT_API_KEY / LIVEKIT_API_SECRET / LIVEKIT_URL from Vercel project
 environment variables (set in the Vercel dashboard — .env is not deployed).
 """
@@ -30,12 +38,25 @@ from livekit import api
 app = FastAPI()
 
 ROOM_NAME = "kings-hospital-demo"
-INDEX_HTML_PATH = Path(__file__).resolve().parent.parent / "public" / "index.html"
+
+CANDIDATE_INDEX_HTML_PATHS = [
+    Path(__file__).resolve().parent.parent / "public" / "index.html",
+    Path("public/index.html"),  # relative to cwd, in case __file__-relative differs
+]
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return INDEX_HTML_PATH.read_text(encoding="utf-8")
+    for path in CANDIDATE_INDEX_HTML_PATHS:
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+    tried = ", ".join(str(p) for p in CANDIDATE_INDEX_HTML_PATHS)
+    return HTMLResponse(
+        f"<pre>public/index.html not found. Tried: {tried}</pre>", status_code=500
+    )
 
 
 @app.get("/api/livekit_token")

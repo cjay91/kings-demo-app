@@ -37,6 +37,7 @@ and the agent don't need to change.
 | `public/index.html` | The web client HTML (mic button + live transcript). Served locally via `python -m http.server`; on Vercel it's read and returned by `api/index.py`, not served statically |
 | `requirements.txt` | Deps shared by `token_server.py` and `api/index.py` (FastAPI, uvicorn, livekit-api, python-dotenv) |
 | `agent-requirements.txt` | Full deps for `agent.py` (livekit-agents, Google plugins, Silero) |
+| `vercel.json` | Forces `public/index.html` into the deployed function's bundle (see Deployment) |
 
 ## Setup
 
@@ -157,6 +158,17 @@ FastAPI app own **every** route it needs, including `/`, so there's nothing
 implicit left to go wrong. `agent-requirements.txt` stays out of what
 Vercel installs via `.vercelignore`, since the agent's dependencies
 (livekit-agents, Google plugins, Silero) are unrelated and much heavier.
+
+One more real gotcha this surfaced: `api/index.py` reads
+`public/index.html` via a plain file path, not a Python import — and
+Vercel's Python bundler only includes files it can trace through actual
+imports, so it silently left `public/index.html` out of the deployed
+function entirely (confirmed via a live `FileNotFoundError` at
+`/var/task/public/index.html`). `vercel.json`'s
+`functions["api/*.py"].includeFiles: "public/**"` forces it into the
+bundle. If this ever regresses, `index()` tries a couple of candidate
+paths and returns a plain-text 500 naming exactly which paths it tried,
+instead of an opaque crash.
 
 1. Push this repo to GitHub (or GitLab/Bitbucket), then import it in the
    [Vercel dashboard](https://vercel.com/new) — no build settings needed.
