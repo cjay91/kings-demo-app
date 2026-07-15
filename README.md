@@ -33,11 +33,10 @@ and the agent don't need to change.
 | `tools.py` | LiveKit function-tools the agent calls to query the DB |
 | `agent.py` | The LiveKit Agents worker (STT → LLM → TTS pipeline) — **runs on a persistent host, not Vercel** (see Deployment) |
 | `token_server.py` | Local FastAPI + uvicorn server that mints LiveKit room tokens, for local dev only |
-| `api/index.py` | FastAPI app deployed to Vercel — serves both `/` (reads `public/index.html` directly) and `/api/livekit_token` |
-| `public/index.html` | The web client HTML (mic button + live transcript). Served locally via `python -m http.server`; on Vercel it's read and returned by `api/index.py`, not served statically |
+| `api/index.py` | FastAPI app deployed to Vercel — serves both `/` and `/api/livekit_token`. The web client HTML is embedded directly in this file as a string (see Deployment for why) |
+| `public/index.html` | The same web client HTML, for local dev only (`python -m http.server`). Must be kept in sync with the copy embedded in `api/index.py` if edited |
 | `requirements.txt` | Deps shared by `token_server.py` and `api/index.py` (FastAPI, uvicorn, livekit-api, python-dotenv) |
 | `agent-requirements.txt` | Full deps for `agent.py` (livekit-agents, Google plugins, Silero) |
-| `vercel.json` | Forces `public/index.html` into the deployed function's bundle (see Deployment) |
 
 ## Setup
 
@@ -130,14 +129,14 @@ serverless platform (Vercel included) supports. So deployment splits in two:
 
 `api/index.py` is a FastAPI app and, per Vercel's docs, becomes **the single
 Vercel Function for the whole project** — every request funnels through it.
-It explicitly defines both routes this app needs: `GET /` (reads and
-returns `public/index.html` directly) and `GET /api/livekit_token` (mints
-the room token). `index.py` is one of Vercel's recognized entrypoint
-filenames (along with `app.py`, `server.py`, `main.py`, `wsgi.py`,
-`asgi.py`), which is why it's not named something more descriptive — an
-arbitrary filename isn't auto-detected without extra config.
+It explicitly defines both routes this app needs: `GET /` and
+`GET /api/livekit_token` (mints the room token). `index.py` is one of
+Vercel's recognized entrypoint filenames (along with `app.py`, `server.py`,
+`main.py`, `wsgi.py`, `asgi.py`), which is why it's not named something more
+descriptive — an arbitrary filename isn't auto-detected without extra
+config.
 
-This design is the result of two failed attempts, worth understanding
+This design is the result of three failed attempts, worth understanding
 before changing anything here:
 
 1. A Flask app with a custom `pyproject.toml` `[tool.vercel] entrypoint`
@@ -149,26 +148,27 @@ before changing anything here:
    FastAPI's own `{"detail":"Not Found"}`. A bare `BaseHTTPRequestHandler`
    (no `app` at all, hoping to dodge single-function detection entirely)
    also got flagged by Vercel's build-time entrypoint scanner the same way
-   `app` was, so that dodge didn't work either.
+   `app` was, so that dodge didn't work either. Lesson: don't rely on
+   Vercel serving `public/**` separately from a Python function that's
+   present in the project — in live testing here, it didn't.
+3. `GET /` reading `public/index.html` from disk via a plain file path at
+   runtime, with `vercel.json`'s `includeFiles` configured to force it into
+   the bundle — still 500'd with `FileNotFoundError` at
+   `/var/task/public/index.html`, confirmed via live runtime logs.
+   `includeFiles` apparently isn't reliable for this either.
 
-The lesson: don't rely on Vercel serving `public/**` separately from a
-Python function that's present in the project — in live testing here, it
-didn't. The current version sidesteps the whole question by having the
-FastAPI app own **every** route it needs, including `/`, so there's nothing
-implicit left to go wrong. `agent-requirements.txt` stays out of what
-Vercel installs via `.vercelignore`, since the agent's dependencies
-(livekit-agents, Google plugins, Silero) are unrelated and much heavier.
-
-One more real gotcha this surfaced: `api/index.py` reads
-`public/index.html` via a plain file path, not a Python import — and
-Vercel's Python bundler only includes files it can trace through actual
-imports, so it silently left `public/index.html` out of the deployed
-function entirely (confirmed via a live `FileNotFoundError` at
-`/var/task/public/index.html`). `vercel.json`'s
-`functions["api/*.py"].includeFiles: "public/**"` forces it into the
-bundle. If this ever regresses, `index()` tries a couple of candidate
-paths and returns a plain-text 500 naming exactly which paths it tried,
-instead of an opaque crash.
+The lesson across all three: don't depend on Vercel's file-inclusion or
+routing behavior working the way its docs describe for anything not
+reachable through a plain Python import — in live testing here, none of
+the documented shortcuts held up. The current version embeds the web
+client's HTML directly as a string literal inside `api/index.py` (see
+`INDEX_HTML` in that file) — since that file is the entrypoint itself, its
+own source is unambiguously always included, no bundler inference
+involved. `public/index.html` still exists for local dev only (`python -m
+http.server`); if you edit the client, update both copies.
+`agent-requirements.txt` stays out of what Vercel installs via
+`.vercelignore`, since the agent's dependencies (livekit-agents, Google
+plugins, Silero) are unrelated and much heavier.
 
 1. Push this repo to GitHub (or GitLab/Bitbucket), then import it in the
    [Vercel dashboard](https://vercel.com/new) — no build settings needed.

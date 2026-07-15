@@ -6,22 +6,22 @@ index.py, server.py, main.py, wsgi.py, or asgi.py, at the root or inside
 src/, app/, or api/.
 
 Per Vercel's docs, deploying a FastAPI app makes it "a single Vercel
-Function" — the one function for the whole project. Two earlier attempts
-relied on Vercel's claimed static-file-takes-precedence behavior to keep
-"/" resolving to public/index.html separately from this app, and both
-failed in live testing — a bare BaseHTTPRequestHandler also got flagged by
-Vercel's entrypoint detection the same way `app` was, so that dodge didn't
-work either. Rather than depend on that precedence again, this app serves
-"/" itself, reading public/index.html directly — no ambiguity, no reliance
-on undocumented routing behavior.
+Function" — the one function for the whole project. This app therefore
+owns every route it needs, including "/", rather than relying on Vercel's
+claimed (and, in live testing on this project, unreliable) precedence for
+serving public/** separately from a Python function.
 
-That file isn't reachable via any Python import, so Vercel's bundler didn't
-include it in the function's deployment automatically (confirmed via a live
-FileNotFoundError at /var/task/public/index.html) — vercel.json's
-`functions["api/*.py"].includeFiles` glob forces it in. If that ever stops
-working (Vercel bundling behavior has proven inconsistent across attempts
-on this project), the error below is written to say exactly what path(s)
-were tried, rather than an opaque 500.
+INDEX_HTML is embedded directly below as a string literal, NOT read from
+public/index.html at runtime. That file is kept for local dev only (see
+README) — Vercel's Python bundler only includes files it can trace through
+actual Python imports, and a file opened via a plain path string doesn't
+qualify, so public/index.html was silently missing from every deployment
+that tried to read it that way (confirmed via a live FileNotFoundError at
+/var/task/public/index.html, even after configuring vercel.json's
+includeFiles to force it in — that didn't help either). Embedding the
+content directly in this file's own source removes any dependency on the
+bundler's file-inclusion behavior. If you edit the web client, update it in
+BOTH public/index.html and INDEX_HTML below.
 
 Reads LIVEKIT_API_KEY / LIVEKIT_API_SECRET / LIVEKIT_URL from Vercel project
 environment variables (set in the Vercel dashboard — .env is not deployed).
@@ -29,7 +29,6 @@ environment variables (set in the Vercel dashboard — .env is not deployed).
 
 import os
 import uuid
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
@@ -39,24 +38,139 @@ app = FastAPI()
 
 ROOM_NAME = "kings-hospital-demo"
 
-CANDIDATE_INDEX_HTML_PATHS = [
-    Path(__file__).resolve().parent.parent / "public" / "index.html",
-    Path("public/index.html"),  # relative to cwd, in case __file__-relative differs
-]
+INDEX_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>King's Hospital Voice Bot — Sample</title>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 640px;
+      margin: 40px auto;
+      padding: 0 16px;
+      color: #1a1a1a;
+    }
+    h1 { font-size: 1.3rem; }
+    button {
+      font-size: 1rem;
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    #connectBtn { background: #1a7f37; color: white; }
+    #disconnectBtn { background: #b91c1c; color: white; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #status { margin: 16px 0; font-weight: 600; }
+    #transcript {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 12px;
+      height: 320px;
+      overflow-y: auto;
+      background: #fafafa;
+    }
+    .line { margin-bottom: 8px; }
+    .patient { color: #0b5cab; }
+    .agent { color: #1a7f37; }
+  </style>
+</head>
+<body>
+  <h1>King's Hospital Voice Bot — Sample (Sinhala)</h1>
+  <p>Click connect, allow microphone access, then speak in Sinhala.</p>
+
+  <button id="connectBtn">Connect</button>
+  <button id="disconnectBtn" disabled>Disconnect</button>
+
+  <div id="status">Disconnected</div>
+  <div id="transcript"></div>
+
+  <script>
+    // Local dev serves this file statically (see README) and runs
+    // token_server.py separately on :8080. Once deployed on Vercel, this
+    // same file is served from the same origin as /api/livekit_token, so a
+    // relative path is used instead.
+    const isLocalDev = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+    const TOKEN_SERVER_URL = isLocalDev
+      ? "http://localhost:8080/token"
+      : "/api/livekit_token";
+
+    const connectBtn = document.getElementById("connectBtn");
+    const disconnectBtn = document.getElementById("disconnectBtn");
+    const statusEl = document.getElementById("status");
+    const transcriptEl = document.getElementById("transcript");
+
+    let room = null;
+
+    function addLine(speaker, text) {
+      const div = document.createElement("div");
+      div.className = "line " + speaker;
+      div.textContent = (speaker === "patient" ? "🧑 You: " : "🤖 Agent: ") + text;
+      transcriptEl.appendChild(div);
+      transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    }
+
+    async function connect() {
+      connectBtn.disabled = true;
+      statusEl.textContent = "Requesting token...";
+
+      const res = await fetch(TOKEN_SERVER_URL);
+      const { token, url } = await res.json();
+
+      room = new LivekitClient.Room();
+
+      room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === "audio") {
+          const el = track.attach();
+          document.body.appendChild(el);
+        }
+      });
+
+      room.on(LivekitClient.RoomEvent.TranscriptionReceived, (segments, participant) => {
+        const isPatient = participant?.identity?.startsWith("patient") ?? true;
+        for (const seg of segments) {
+          if (!seg.final) continue;
+          addLine(isPatient ? "patient" : "agent", seg.text);
+        }
+      });
+
+      room.on(LivekitClient.RoomEvent.Disconnected, () => {
+        statusEl.textContent = "Disconnected";
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+      });
+
+      await room.connect(url, token);
+      await room.localParticipant.setMicrophoneEnabled(true);
+
+      statusEl.textContent = "Connected — speak in Sinhala";
+      disconnectBtn.disabled = false;
+    }
+
+    async function disconnect() {
+      if (room) {
+        await room.disconnect();
+        room = null;
+      }
+    }
+
+    connectBtn.addEventListener("click", () => connect().catch((e) => {
+      statusEl.textContent = "Error: " + e.message;
+      connectBtn.disabled = false;
+    }));
+    disconnectBtn.addEventListener("click", disconnect);
+  </script>
+</body>
+</html>
+"""
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    for path in CANDIDATE_INDEX_HTML_PATHS:
-        try:
-            return path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-
-    tried = ", ".join(str(p) for p in CANDIDATE_INDEX_HTML_PATHS)
-    return HTMLResponse(
-        f"<pre>public/index.html not found. Tried: {tried}</pre>", status_code=500
-    )
+    return INDEX_HTML
 
 
 @app.get("/api/livekit_token")
