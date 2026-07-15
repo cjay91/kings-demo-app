@@ -4,3 +4,4 @@ __pycache__/
 .env
 gcp-service-account.json
 hospital.db
+livekit.toml
