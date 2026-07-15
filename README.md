@@ -33,10 +33,9 @@ and the agent don't need to change.
 | `tools.py` | LiveKit function-tools the agent calls to query the DB |
 | `agent.py` | The LiveKit Agents worker (STT → LLM → TTS pipeline) — **runs on a persistent host, not Vercel** (see Deployment) |
 | `token_server.py` | Local FastAPI + uvicorn server that mints LiveKit room tokens, for local dev only |
-| `api/livekit_token.py` | Same token logic as a plain `BaseHTTPRequestHandler`, deployed to Vercel |
-| `public/index.html` | Minimal browser client (mic button + live transcript) |
-| `requirements.txt` | The one dependency (`livekit-api`) Vercel's function actually needs |
-| `dev-requirements.txt` | Local-dev-only deps for `token_server.py` (FastAPI, uvicorn) |
+| `api/index.py` | FastAPI app deployed to Vercel — serves both `/` (reads `public/index.html` directly) and `/api/livekit_token` |
+| `public/index.html` | The web client HTML (mic button + live transcript). Served locally via `python -m http.server`; on Vercel it's read and returned by `api/index.py`, not served statically |
+| `requirements.txt` | Deps shared by `token_server.py` and `api/index.py` (FastAPI, uvicorn, livekit-api, python-dotenv) |
 | `agent-requirements.txt` | Full deps for `agent.py` (livekit-agents, Google plugins, Silero) |
 
 ## Setup
@@ -46,19 +45,13 @@ and the agent don't need to change.
 ```bash
 python -m venv .venv
 source .venv/Scripts/activate   # Windows Git Bash; use .venv\Scripts\activate.bat for cmd.exe
-pip install -r dev-requirements.txt -r agent-requirements.txt
+pip install -r requirements.txt -r agent-requirements.txt
 ```
 
-Three requirements files, kept deliberately separate:
-- `requirements.txt` — just `livekit-api`, the only thing Vercel's deployed
-  function needs. Nothing else should go in this file (see Deployment).
-- `dev-requirements.txt` — adds FastAPI + uvicorn, for running
-  `token_server.py` locally.
-- `agent-requirements.txt` — the agent worker's real dependencies
-  (livekit-agents, Google plugins, Silero).
-
-Locally, installing `dev-requirements.txt` + `agent-requirements.txt` covers
-everything (it already includes `livekit-api` too).
+(`requirements.txt` covers both the local token server and the Vercel
+function; `agent-requirements.txt` covers the agent worker's much heavier
+dependencies, kept separate so Vercel's build never has to touch them — see
+Deployment below.)
 
 ### 2. Get credentials
 
@@ -134,38 +127,36 @@ serverless platform (Vercel included) supports. So deployment splits in two:
 
 ### Part 1 — Web client + token endpoint on Vercel
 
-This repo is already structured for zero-config Vercel deployment:
-`public/index.html` is served as the static site, and `api/livekit_token.py`
-becomes a serverless function at `/api/livekit_token`. It deliberately uses
-the raw `BaseHTTPRequestHandler` pattern rather than a framework (Flask,
-FastAPI) — this is the one approach that's actually been verified working
-end-to-end on a live Vercel deployment for this project.
+`api/index.py` is a FastAPI app and, per Vercel's docs, becomes **the single
+Vercel Function for the whole project** — every request funnels through it.
+It explicitly defines both routes this app needs: `GET /` (reads and
+returns `public/index.html` directly) and `GET /api/livekit_token` (mints
+the room token). `index.py` is one of Vercel's recognized entrypoint
+filenames (along with `app.py`, `server.py`, `main.py`, `wsgi.py`,
+`asgi.py`), which is why it's not named something more descriptive — an
+arbitrary filename isn't auto-detected without extra config.
 
-**Do not change this file to use Flask/FastAPI/Django, and do not add a
-top-level `app` or `application` variable anywhere under `api/`.** Two
-separate attempts at that broke `/` in production:
+This design is the result of two failed attempts, worth understanding
+before changing anything here:
 
 1. A Flask app with a custom `pyproject.toml` `[tool.vercel] entrypoint`
-   pointing at a non-standard filename — Vercel turned it into the catch-all
-   handler for the entire domain, and `/` returned Flask's 404 page instead
-   of `public/index.html`.
-2. A FastAPI app named `api/index.py` (one of Vercel's auto-detected
-   entrypoint filenames, the officially documented way to add a Python API
-   framework) — same failure, `/` returned FastAPI's `{"detail":"Not
-   Found"}` instead of the web client. Vercel's docs claim static files
-   under `public/**` take precedence over the framework app, but that did
-   not hold up in two live tests.
+   pointing at a non-standard filename — broke `/`, which returned Flask's
+   404 page.
+2. A FastAPI app at `api/index.py`, but *relying on Vercel's claimed
+   static-file precedence* to serve `public/index.html` at `/` without the
+   app defining that route itself — broke `/` the same way, returning
+   FastAPI's own `{"detail":"Not Found"}`. A bare `BaseHTTPRequestHandler`
+   (no `app` at all, hoping to dodge single-function detection entirely)
+   also got flagged by Vercel's build-time entrypoint scanner the same way
+   `app` was, so that dodge didn't work either.
 
-Vercel apparently treats *any* file under `api/` that defines an `app`/
-`application` variable as a potential single entrypoint for the whole
-project — once it finds one, static-vs-function precedence stopped working
-correctly for this project both times. The `handler`-class-per-file pattern
-avoids that entirely: it has no global `app`, so it can only ever be
-reached at its own literal path, `/api/livekit_token`. `requirements.txt`
-is kept to just `livekit-api` for the same reason — no framework, nothing
-for Vercel to auto-detect. `agent-requirements.txt` and
-`dev-requirements.txt` are both listed in `.vercelignore` so neither is
-even uploaded.
+The lesson: don't rely on Vercel serving `public/**` separately from a
+Python function that's present in the project — in live testing here, it
+didn't. The current version sidesteps the whole question by having the
+FastAPI app own **every** route it needs, including `/`, so there's nothing
+implicit left to go wrong. `agent-requirements.txt` stays out of what
+Vercel installs via `.vercelignore`, since the agent's dependencies
+(livekit-agents, Google plugins, Silero) are unrelated and much heavier.
 
 1. Push this repo to GitHub (or GitLab/Bitbucket), then import it in the
    [Vercel dashboard](https://vercel.com/new) — no build settings needed.
