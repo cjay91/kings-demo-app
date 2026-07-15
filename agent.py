@@ -1,17 +1,34 @@
 """King's Hospital sample voice agent.
 
-Pipeline: Google Cloud STT (Sinhala) -> Gemini (dialog + tool-calling) ->
-Google Cloud TTS (Sinhala), running as a LiveKit Agents worker.
+Pipeline: Gemini Live API (speech-to-speech, Sinhala) handling STT+LLM+TTS
+as a single model, running as a LiveKit Agents worker.
+
+This replaced a Google Cloud STT + Gemini LLM + Google Cloud TTS pipeline
+after live testing (with real credentials) found Cloud Text-to-Speech has
+zero voices for Sinhala at all -- not a naming issue, the product doesn't
+support the language. Cloud STT does work for Sinhala (via the chirp_2
+model outside the "global" location), but with TTS a dead end, the whole
+pipeline moved to the Gemini Live API instead, authenticated with just
+GOOGLE_API_KEY -- no Google Cloud service account needed for this at all.
+
+Sinhala audio quality through Gemini's native-audio model is UNVERIFIED --
+confirmed only that it constructs and connects with a Sinhala system
+prompt; actual speech quality needs real testing via `python agent.py
+console` or a live room. If it's not good enough, see the README's
+"Known risks" section for other options that were considered
+(Vertex AI Gemini TTS, a third-party Sinhala TTS provider).
 
 Run:
     python agent.py dev      # connects to LiveKit, waits for a room to join
     python agent.py console  # local mic/speaker test, no LiveKit room needed
 """
 
+import os
+
 from dotenv import load_dotenv
 
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
-from livekit.plugins import google, silero
+from livekit.plugins.google.realtime import RealtimeModel
 
 import db
 from tools import HOSPITAL_TOOLS
@@ -48,14 +65,14 @@ async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
 
     session = AgentSession(
-        # chirp_3 has the broadest multilingual coverage of Google's STT
-        # models, which matters most for a lower-resource language like
-        # Sinhala. Verify accuracy against real call samples before relying
-        # on this for anything beyond a demo (see README "Known risks").
-        stt=google.STT(languages="si-LK", model="chirp_3", detect_language=False),
-        llm=google.LLM(model="gemini-2.5-flash", temperature=0.2),
-        tts=google.TTS(language="si-LK", voice_name="si-LK-Standard-A"),
-        vad=silero.VAD.load(),
+        llm=RealtimeModel(
+            api_key=os.environ["GOOGLE_API_KEY"],
+            # Not the VertexAI-only "gemini-live-2.5-flash-native-audio" --
+            # that model requires vertexai=True and fails fast otherwise.
+            model="gemini-2.5-flash-native-audio-preview-12-2025",
+            voice="Kore",
+            language="si-LK",
+        ),
     )
 
     await session.start(agent=HospitalAgent(), room=ctx.room)
