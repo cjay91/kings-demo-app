@@ -49,6 +49,9 @@ README.md
 CONTRIBUTING.md
 LICENSE
 
+# React frontend -- not needed by the agent container at all
+frontend/
+
 # Coding agent files
 .claude/
 .codex/

@@ -11,16 +11,38 @@ mocked" at the bottom before treating it as more than that.
 ## Architecture
 
 ```
-Web browser (mic)  →  LiveKit room  →  LiveKit Agent worker (agent.py)
-                                          ├─ Gemini Live API (speech-to-speech,
-                                          │  si-LK) — STT+LLM+TTS as one model
-                                          └─ Tools (tools.py) → SQLite mock DB (db.py)
+React frontend (frontend/)  →  LiveKit room  →  LiveKit Agent worker (agent.py)
+  or public/index.html                             ├─ Azure STT (si-LK)
+                                                     ├─ Gemini 2.5 Flash (LLM + tool-calling)
+                                                     ├─ GeminiTTS, with fallback to a
+                                                     │  second model if the primary hits
+                                                     │  its daily quota
+                                                     └─ Tools (tools.py) → SQLite mock DB (db.py)
 ```
 
-This replaced an earlier Google Cloud STT + Gemini LLM + Google Cloud TTS
-pipeline after live testing (with real credentials) found Cloud
-Text-to-Speech has zero voices for Sinhala at all — not a naming issue,
-the product doesn't support the language. See "Known risks" below.
+This is the third architecture tried, each dropped for a concrete reason
+found via live testing with real credentials, not guesswork:
+
+1. **Google Cloud STT + Gemini LLM + Google Cloud TTS** — Cloud
+   Text-to-Speech has zero voices for Sinhala at all (`list_voices()`
+   confirmed it), not a naming issue.
+2. **Gemini Live API** (`RealtimeModel`, one model for STT+LLM+TTS) —
+   worked for basic conversation, but Sinhala isn't in Gemini Live's
+   supported language list (hard-rejects `language="si-LK"`, even bare
+   `"si"`), and leaving it unset to infer the language from the system
+   prompt made tool calls hang indefinitely (Gemini's own default
+   `tool_response_scheduling` is `WHEN_IDLE`, and a live duplex session
+   never seems to reach "idle").
+3. **Current: a streaming cascade** — Azure Speech for STT (has actual
+   named Sinhala voices/language support, unlike Google's Cloud products),
+   Gemini as a plain text LLM (no realtime audio involved, just normal
+   chat + tool-calling), and `GeminiTTS` (`livekit.plugins.google.beta`,
+   a different code path than `google.TTS` — this one works with just an
+   API key, no Vertex AI needed).
+
+See "Known risks" below for what's still unverified about Sinhala quality
+in the current setup, and the TTS daily-quota gotcha that took a couple of
+rounds to fully diagnose.
 
 The 4 tools in `tools.py` map directly to the 4 e-Channelling endpoints in
 the build guide (Section 5.1): consultant search, doctor sessions, available
@@ -32,15 +54,16 @@ and the agent don't need to change.
 
 | File | Purpose |
 |---|---|
-| `db.py` | SQLite schema + query functions (mock e-Channelling DB) |
-| `seed.py` | Populates `hospital.db` with sample doctors/sessions |
-| `tools.py` | LiveKit function-tools the agent calls to query the DB |
-| `agent.py` | The LiveKit Agents worker (Gemini Live API speech-to-speech) — **runs on a persistent host, not Vercel** (see Deployment) |
+| `db.py` | SQLite schema + query functions (mock e-Channelling DB). Doctors have both English and Sinhala name/specialty columns — see "Known risks" for why |
+| `seed.py` | Populates `hospital.db` with sample doctors/sessions. Called by `agent.py` on every job (not just once), since the deployed container can't rely on `hospital.db` itself surviving into the build — see Deployment Part 2 |
+| `tools.py` | LiveKit function-tools the agent calls to query the DB, including Sinhala 12-hour time formatting (`_format_time_si`) |
+| `agent.py` | The LiveKit Agents worker (Azure STT + Gemini LLM + GeminiTTS cascade) — **runs on a persistent host, not Vercel** (see Deployment) |
 | `token_server.py` | Local FastAPI + uvicorn server that mints LiveKit room tokens, for local dev only |
-| `api/index.py` | FastAPI app deployed to Vercel — serves both `/` and `/api/livekit_token`. The web client HTML is embedded directly in this file as a string (see Deployment for why) |
-| `public/index.html` | The same web client HTML, for local dev only (`python -m http.server`). Must be kept in sync with the copy embedded in `api/index.py` if edited |
+| `api/index.py` | FastAPI app deployed to Vercel — serves both `/` and `/api/livekit_token`. The (simple, non-React) web client HTML is embedded directly in this file as a string (see Deployment for why) |
+| `public/index.html` | The same simple web client HTML, for local dev only (`python -m http.server`). Must be kept in sync with the copy embedded in `api/index.py` if edited |
+| `frontend/` | The real (React) web client — a separate Vite app, deployed as its own Vercel project. See `frontend/README.md` and Deployment Part 3 |
 | `requirements.txt` | Deps shared by `token_server.py` and `api/index.py` (FastAPI, uvicorn, livekit-api, python-dotenv) |
-| `requirements.lock` | Full deps for `agent.py` (livekit-agents, Google plugins) — named `.lock` instead of `agent-requirements.txt` on purpose, see Deployment Part 2 |
+| `requirements.lock` | Full deps for `agent.py` (livekit-agents, Google + Azure + OpenAI plugins) — named `.lock` instead of `agent-requirements.txt` on purpose, see Deployment Part 2 |
 | `Dockerfile`, `.dockerignore` | Generated by `lk agent create`, then hand-fixed (see Deployment Part 2) — committed since they're account-agnostic and reusable |
 
 ## Setup
@@ -65,9 +88,11 @@ Deployment below for why it's named `.lock` instead of the more obvious
   the project URL, API key, and API secret. (Self-hosting is also an option;
   point `LIVEKIT_URL` at your own server instead.)
 - **Gemini**: get an API key from https://aistudio.google.com/apikey — this
-  is the *only* Google credential needed. `agent.py` uses the Gemini Live
-  API exclusively (speech-to-speech in one model), authenticated with just
-  this key. No Google Cloud service account is required.
+  is the *only* Google credential needed. `agent.py` uses it for both the
+  LLM and TTS (`GeminiTTS`), no Google Cloud service account required.
+- **Azure Speech**: in the [Azure Portal](https://portal.azure.com), create
+  a "Speech" resource, then grab its key and region from "Keys and
+  Endpoint". Used for STT only.
 
 Copy `.env.example` to `.env` and fill in all values:
 
@@ -105,12 +130,15 @@ python agent.py dev
 # Terminal 2 — the token server, for the web client to get a room token
 python token_server.py
 
-# Terminal 3 — serve the static web client
-cd public && python -m http.server 5500
+# Terminal 3 — the web client. Either the real React one:
+cd frontend && npm install && npm run dev     # http://localhost:5173
+
+# ...or the simple zero-build fallback:
+cd public && python -m http.server 5500       # http://localhost:5500
 ```
 
-Then open http://localhost:5500 in your browser, click **Connect**, allow
-microphone access, and speak in Sinhala.
+Open whichever client you started, click **Connect**, allow microphone
+access, and speak in Sinhala.
 
 ## Example things to try saying
 
@@ -172,7 +200,14 @@ involved. `public/index.html` still exists for local dev only (`python -m
 http.server`); if you edit the client, update both copies.
 `requirements.lock` stays out of what Vercel installs via `.vercelignore`,
 since the agent's dependencies (livekit-agents, Google plugins) are
-unrelated and much heavier.
+unrelated and much heavier. `frontend/` is excluded too (see Part 3) —
+its `node_modules` has no business anywhere near this Python function's
+build.
+
+This app also has CORS enabled (wide open — it only ever hands out a
+scoped, short-lived room token, nothing sensitive to leak), since the
+React frontend in Part 3 deploys to a different domain and calls this
+API cross-origin.
 
 1. Push this repo to GitHub (or GitLab/Bitbucket), then import it in the
    [Vercel dashboard](https://vercel.com/new) — no build settings needed.
@@ -232,11 +267,19 @@ container image. It's excluded here now, but if you ever hand-run
 `lk agent create` again and it regenerates `.dockerignore`, check that
 line survived.
 
-Set secrets (these become the container's environment variables) — just
-the one Gemini key, no Google Cloud service account needed:
+Set secrets (these become the container's environment variables) — no
+Google Cloud service account needed, just the Gemini and Azure keys:
 
 ```bash
-lk agent update-secrets --secrets "GOOGLE_API_KEY=your_gemini_key"
+lk agent update-secrets --secrets "GOOGLE_API_KEY=your_gemini_key,AZURE_API_KEY=your_azure_key,AZURE_REGION=your_azure_region"
+```
+
+Or point `--secrets-file` at your local `.env` instead, which picks up
+everything at once (including a couple of harmless extras like
+`TOKEN_SERVER_PORT` that the agent doesn't use):
+
+```bash
+lk agent update-secrets --secrets-file .env --overwrite
 ```
 
 Then create and deploy:
@@ -255,45 +298,101 @@ your account's actual agent ID — that file is git-ignored since it's
 tied to your specific LiveKit account, not something to share or reuse
 across deployments.
 
-Once both parts are live, the Vercel-hosted web client creates a LiveKit
-room via `/api/livekit_token`, and your LiveKit Cloud-hosted agent worker
-picks up that room dispatch automatically — same flow as local dev, just
-with both halves running remotely instead of on your machine.
+Once both parts are live, the web client creates a LiveKit room via
+`/api/livekit_token`, and your LiveKit Cloud-hosted agent worker picks up
+that room dispatch automatically — same flow as local dev, just with both
+halves running remotely instead of on your machine.
+
+**A gotcha specific to testing this manually**: the room name is
+hardcoded (`kings-hospital-demo`, see "Known risks"), and LiveKit only
+auto-dispatches an agent when a room is *newly created* — if a previous
+test's room is still alive (check with `lk room list`), reconnecting to
+it won't trigger a fresh dispatch, and the agent will look like it's not
+responding at all. Run `lk room delete kings-hospital-demo` before each
+fresh test to be safe. Also useful: `lk agent logs` for a live tail of
+what the agent is actually doing (it appears to only show activity from
+the moment you run it, not history — start it *before* you connect, not
+after).
+
+### Part 3 — React frontend on Vercel
+
+`frontend/` is a separate Vite + React app — see `frontend/README.md`.
+Deploys as its own Vercel project (same repo, different **Root
+Directory**), entirely independent of the Python API project in Part 1:
+
+1. Vercel dashboard → **Add New → Project** → import this same repo again
+2. Set **Root Directory** to `frontend`
+3. Vercel auto-detects Vite — no other config needed, just deploy
+4. `frontend/.env.production` already points `VITE_TOKEN_ENDPOINT` at the
+   deployed API from Part 1 — update it if that URL ever changes (Vite
+   bakes env vars in at build time, so this needs a rebuild to take
+   effect, not just a settings change)
+
+This is deliberately a **separate** project rather than folded into the
+Python API project — see the note at the top of Part 1 about Vercel's
+Python runtime treating a FastAPI app as a catch-all that must own every
+route it serves, static files included. Mixing a real multi-file React
+build into that same project risks the exact same "file silently missing
+from the deployment" failure mode already hit (and fixed) once today for
+a single HTML file; a full JS/CSS bundle is a bigger target for the same
+class of bug. Keeping the frontend as Vercel's native, well-tested
+Vite/React deployment path avoids the question entirely.
 
 ## Known risks & what's mocked
 
 Carried over from the build guide's own risk list (Section 8) — these apply
 here too and are the reason this is a sample, not production-ready:
 
-- **Sinhala speech quality through the Gemini Live API is unverified.**
-  This project originally used Google Cloud Speech-to-Text + Cloud
-  Text-to-Speech for Sinhala, on the assumption both had solid Sinhala
-  support. Live testing with real credentials proved that assumption wrong
-  for TTS specifically — a `list_voices(language_code="si-LK")` call
-  returned **zero voices**; the product doesn't support the language at
-  all, not a naming issue. (Cloud STT does accept `si-LK`, but only via the
-  `chirp_2` model outside the `location="global"` — `chirp_3` explicitly
-  rejects it. That fix is in `agent.py`, but was only confirmed to *accept*
-  Sinhala as a language, never quality-tested against real speech.) Given
-  TTS was a dead end, the whole pipeline moved to the Gemini Live API
-  (`RealtimeModel`, one model for STT+LLM+TTS, authenticated with just
-  `GOOGLE_API_KEY`) — confirmed to construct and connect with a Sinhala
-  system prompt, but actual audio quality for Sinhala specifically has NOT
-  been tested with real speech. Run `python agent.py console` first and
-  judge for yourself before building further on top of this — if it's not
-  good enough, two other options were identified and not yet tried:
-  enabling Vertex AI to use Gemini's TTS models (same 3-piece pipeline
-  shape, extra GCP setup), or swapping in a third-party TTS provider with
-  documented Sinhala support (e.g. Azure, ElevenLabs) alongside the
-  now-working Cloud STT.
+- **Sinhala STT accuracy is only lightly verified.** A synthetic
+  TTS-generated audio clip round-tripped through Azure STT came back with
+  2 word-level misses out of ~7 words, including one semantic miss ("හෘද"
+  /heart/ heard as "විරුද්ධ" /opposite/). That's one data point on
+  synthetic audio, not real speech — actual quality with a real patient's
+  voice, accent, and background noise needs real judgment, not just
+  `agent.py console`, which was itself only checked for whether it
+  connects, not for output quality.
+- **Google's Cloud Speech-to-Text and Text-to-Speech products were
+  dropped, not just swapped out casually** — worth knowing if you're
+  tempted to switch back. Cloud TTS has zero voices for Sinhala at all
+  (`list_voices()` confirmed it, not a naming issue). Cloud STT does
+  accept `si-LK`, but only via the `chirp_2` model outside
+  `location="global"` — `chirp_3` explicitly rejects the language. The
+  Gemini Live API (`RealtimeModel`, tried as a single-model alternative)
+  also hard-rejects `si-LK`/`si` as a language code, and leaving it unset
+  made tool calls hang indefinitely. None of these are fixed by minor
+  config changes — they're the reason the architecture is what it is now.
+- **Gemini TTS models have small, fixed daily quotas that don't scale
+  with billing tier** — hit this live: `gemini-3.1-flash-tts-preview`
+  capped at 100 requests/day on the free tier, confirmed via a 429
+  `RESOURCE_EXHAUSTED` error mid-demo (looked exactly like the agent had
+  silently stopped responding). `agent.py` wraps TTS in a
+  `tts.FallbackAdapter` with a second model (`gemini-2.5-flash-preview-tts`)
+  so it degrades gracefully instead of going silent, but that fallback is
+  *also* a preview model and likely has its own cap — if both get
+  exhausted on the same day, expect the same symptom again. A non-Gemini
+  TTS provider (e.g. Azure TTS, matching the STT provider) would sidestep
+  this entirely if it becomes a recurring problem.
+- **Doctor name/specialty matching is substring-only, not fuzzy or
+  phonetic.** Seed data has both English and Sinhala name/specialty
+  columns (`db.py`'s `doc_name_si`/`specialty_si`) specifically because
+  Sinhala speakers say names in Sinhala script, which won't `LIKE`-match
+  English text — that part's fixed. But it's still exact substring
+  matching: a mispronounced or STT-mistranscribed name/specialty (a real
+  risk given the STT accuracy caveat above) simply won't match anything,
+  and the agent will incorrectly tell the caller no such doctor exists.
+  A real system would want fuzzy/phonetic matching here.
 - **Database is mocked and static.** No write path, no concurrency handling,
   no real slot-booking — it only supports the 4 read-style lookups.
+  `agent.py` re-seeds it fresh on every job (see Deployment Part 2 for
+  why), so nothing persists between calls anyway.
 - **No emergency-call detection or human escalation** — the system prompt
   tells the agent to redirect emergencies verbally, but there's no separate
   safety-critical detection layer like the real system would need (build
   guide Section 2.2, Layer 6).
 - **No auth on the token endpoint** — anyone who can reach `/token` (local)
-  or `/api/livekit_token` (Vercel) gets a room token. Fine for a demo; would
-  need real patient auth before any real deployment.
+  or `/api/livekit_token` (deployed) gets a room token. Fine for a demo;
+  would need real patient auth before any real deployment.
 - **Single hardcoded room** (`kings-hospital-demo`) — every browser session
-  joins the same room, so only test with one caller at a time.
+  joins the same room, so only test with one caller at a time. Also means
+  a leftover room from a previous test can block a fresh agent dispatch —
+  see the gotcha note in Deployment Part 2.

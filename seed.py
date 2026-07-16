@@ -8,17 +8,21 @@ from datetime import datetime, timedelta
 
 import db
 
+# (English name, Sinhala name, English specialty, Sinhala specialty, qualifications)
+# Sinhala names/specialties matter for matching: a Sinhala-speaking caller says
+# names and specialties in Sinhala script, which won't LIKE-match English text
+# in db.search_doctors_by_name/by_specialty without these columns.
 DOCTORS = [
-    ("Dr. Nimal Perera", "Cardiology", "MBBS, MD (Cardiology), FRCP"),
-    ("Dr. Priyanka Fernando", "Cardiology", "MBBS, MD (Cardiology)"),
-    ("Dr. Ashan Silva", "Orthopaedics", "MBBS, MS (Orthopaedic Surgery)"),
-    ("Dr. Chamari Wickramasinghe", "Orthopaedics", "MBBS, MS (Ortho), FRCS"),
-    ("Dr. Ruwan Jayasuriya", "Pediatrics", "MBBS, DCH, MD (Paediatrics)"),
-    ("Dr. Dilani Gunawardena", "Pediatrics", "MBBS, MD (Paediatrics)"),
-    ("Dr. Kasun Rathnayake", "Dermatology", "MBBS, MD (Dermatology)"),
-    ("Dr. Sanduni Bandara", "ENT", "MBBS, MS (ENT)"),
-    ("Dr. Mahesh Karunaratne", "General Medicine", "MBBS, MD (Medicine)"),
-    ("Dr. Tharushi Amarasinghe", "Gynaecology", "MBBS, MS (OBGYN)"),
+    ("Dr. Nimal Perera", "නිමල් පෙරේරා", "Cardiology", "හෘද රෝග", "MBBS, MD (Cardiology), FRCP"),
+    ("Dr. Priyanka Fernando", "ප්‍රියංකා ප්‍රනාන්දු", "Cardiology", "හෘද රෝග", "MBBS, MD (Cardiology)"),
+    ("Dr. Ashan Silva", "අශාන් සිල්වා", "Orthopaedics", "අස්ථි රෝග", "MBBS, MS (Orthopaedic Surgery)"),
+    ("Dr. Chamari Wickramasinghe", "චමාරි වික්‍රමසිංහ", "Orthopaedics", "අස්ථි රෝග", "MBBS, MS (Ortho), FRCS"),
+    ("Dr. Ruwan Jayasuriya", "රුවන් ජයසූරිය", "Pediatrics", "ළමා රෝග", "MBBS, DCH, MD (Paediatrics)"),
+    ("Dr. Dilani Gunawardena", "දිලානි ගුණවර්ධන", "Pediatrics", "ළමා රෝග", "MBBS, MD (Paediatrics)"),
+    ("Dr. Kasun Rathnayake", "කසුන් රත්නායක", "Dermatology", "සම් රෝග", "MBBS, MD (Dermatology)"),
+    ("Dr. Sanduni Bandara", "සඳුනි බණ්ඩාර", "ENT", "කන් නාසය උගුර රෝග", "MBBS, MS (ENT)"),
+    ("Dr. Mahesh Karunaratne", "මහේෂ් කරුණාරත්න", "General Medicine", "සාමාන්‍ය වෛද්‍ය", "MBBS, MD (Medicine)"),
+    ("Dr. Tharushi Amarasinghe", "තරුෂි අමරසිංහ", "Gynaecology", "ස්ත්‍රී රෝග", "MBBS, MS (OBGYN)"),
 ]
 
 # (doc index, day offset from today, start_time, total_slots)
@@ -41,16 +45,13 @@ SESSIONS = [
 
 
 def run():
-    db.init_db()
+    db.init_db(reset=True)
     with db.get_conn() as conn:
-        conn.execute("DELETE FROM running_status")
-        conn.execute("DELETE FROM sessions")
-        conn.execute("DELETE FROM doctors")
-
-        for i, (name, specialty, quals) in enumerate(DOCTORS):
+        for i, (name, name_si, specialty, specialty_si, quals) in enumerate(DOCTORS):
             conn.execute(
-                "INSERT INTO doctors (doc_id, doc_name, specialty, qualifications) VALUES (?, ?, ?, ?)",
-                (i + 1, name, specialty, quals),
+                "INSERT INTO doctors (doc_id, doc_name, doc_name_si, specialty, specialty_si, qualifications) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (i + 1, name, name_si, specialty, specialty_si, quals),
             )
 
         today = datetime.now()

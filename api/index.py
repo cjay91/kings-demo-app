@@ -31,10 +31,22 @@ import os
 import uuid
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from livekit import api
 
 app = FastAPI()
+
+# The React frontend (frontend/) deploys as a separate Vercel project, on a
+# different domain, so /api/livekit_token needs to be reachable cross-origin.
+# Wide open is fine here -- this endpoint only ever hands out a scoped,
+# short-lived room-join token, same as the "no auth" risk already noted in
+# the README; there's nothing sensitive to leak by allowing any origin.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+)
 
 ROOM_NAME = "kings-hospital-demo"
 

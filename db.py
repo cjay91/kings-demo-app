@@ -15,7 +15,9 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS doctors (
     doc_id INTEGER PRIMARY KEY,
     doc_name TEXT NOT NULL,
+    doc_name_si TEXT NOT NULL,      -- Sinhala transliteration, e.g. "නිමල් පෙරේරා"
     specialty TEXT NOT NULL,
+    specialty_si TEXT NOT NULL,     -- Sinhala term, e.g. "හෘද රෝග"
     qualifications TEXT NOT NULL
 );
 
@@ -49,16 +51,27 @@ def get_conn():
         conn.close()
 
 
-def init_db():
+def init_db(reset: bool = False):
     with get_conn() as conn:
+        if reset:
+            # Drop-and-recreate rather than rely on IF NOT EXISTS: a table
+            # created under an older schema version (e.g. before doc_name_si/
+            # specialty_si existed) would otherwise silently keep its old
+            # columns forever, breaking every seed() call after a schema
+            # change. Order matters for the foreign keys (children first).
+            conn.executescript(
+                "DROP TABLE IF EXISTS running_status;"
+                "DROP TABLE IF EXISTS sessions;"
+                "DROP TABLE IF EXISTS doctors;"
+            )
         conn.executescript(SCHEMA)
 
 
 def search_doctors_by_name(name: str):
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM doctors WHERE doc_name LIKE ?",
-            (f"%{name}%",),
+            "SELECT * FROM doctors WHERE doc_name LIKE ? OR doc_name_si LIKE ?",
+            (f"%{name}%", f"%{name}%"),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -66,8 +79,8 @@ def search_doctors_by_name(name: str):
 def search_doctors_by_specialty(specialty: str):
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM doctors WHERE specialty LIKE ?",
-            (f"%{specialty}%",),
+            "SELECT * FROM doctors WHERE specialty LIKE ? OR specialty_si LIKE ?",
+            (f"%{specialty}%", f"%{specialty}%"),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -92,7 +105,8 @@ def get_available_doctors_by_date(date: str):
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT d.doc_id, d.doc_name, d.specialty, s.session_id, s.start_time, s.total_slots
+            SELECT d.doc_id, d.doc_name, d.doc_name_si, d.specialty, d.specialty_si,
+                   s.session_id, s.start_time, s.total_slots
             FROM sessions s
             JOIN doctors d ON d.doc_id = s.doc_id
             WHERE s.session_date = ?

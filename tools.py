@@ -25,6 +25,18 @@ def _relative_date(text: str) -> str:
     return text  # assume already YYYY-MM-DD
 
 
+def _format_time_si(hhmm: str) -> str:
+    """Format a 24-hour "HH:MM" string as 12-hour Sinhala time, e.g. "15:00"
+    -> "3:00 ප.ව". Done here rather than left to the LLM since correctly
+    converting 24-hour time into Sinhala පෙ.ව/ප.ව notation on the fly is
+    exactly the kind of small formatting detail an LLM can get inconsistent
+    about -- pushing it into the tool output makes it always correct."""
+    hour, minute = map(int, hhmm.split(":"))
+    period = "පෙ.ව" if hour < 12 else "ප.ව"
+    hour12 = hour % 12 or 12
+    return f"{hour12}:{minute:02d} {period}"
+
+
 @function_tool()
 async def search_consultants(context: RunContext, query: str) -> str:
     """Search for consultants (doctors) by name or by specialty.
@@ -44,7 +56,8 @@ async def search_consultants(context: RunContext, query: str) -> str:
         return f"No consultants found matching '{query}'."
 
     lines = [
-        f"{d['doc_name']} ({d['specialty']}) - {d['qualifications']}"
+        f"{d['doc_name_si']} / {d['doc_name']} ({d['specialty_si']} / {d['specialty']}) "
+        f"- {d['qualifications']}"
         for d in results
     ]
     return "Found consultants:\n" + "\n".join(lines)
@@ -73,14 +86,17 @@ async def get_doctor_sessions(
 
     if not sessions:
         scope = f" on {resolved_date}" if resolved_date else ""
-        return f"{doc['doc_name']} has no available sessions{scope}."
+        return f"{doc['doc_name_si']} / {doc['doc_name']} has no available sessions{scope}."
 
     lines = [
-        f"Session {s['session_id']}: {s['session_date']} at {s['start_time']} "
+        f"Session {s['session_id']}: {s['session_date']} at {_format_time_si(s['start_time'])} "
         f"({s['total_slots']} slots)"
         for s in sessions
     ]
-    return f"{doc['doc_name']} ({doc['specialty']}) sessions:\n" + "\n".join(lines)
+    return (
+        f"{doc['doc_name_si']} / {doc['doc_name']} ({doc['specialty_si']} / {doc['specialty']}) "
+        "sessions:\n" + "\n".join(lines)
+    )
 
 
 @function_tool()
@@ -100,8 +116,8 @@ async def get_available_doctors_by_date(context: RunContext, date: str) -> str:
         return f"No doctors have sessions on {resolved_date}."
 
     lines = [
-        f"{r['doc_name']} ({r['specialty']}) at {r['start_time']} "
-        f"[session {r['session_id']}]"
+        f"{r['doc_name_si']} / {r['doc_name']} ({r['specialty_si']} / {r['specialty']}) "
+        f"at {_format_time_si(r['start_time'])} [session {r['session_id']}]"
         for r in rows
     ]
     return f"Doctors available on {resolved_date}:\n" + "\n".join(lines)
@@ -123,7 +139,7 @@ async def get_running_number(context: RunContext, session_id: int) -> str:
 
     return (
         f"Session {session_id}: currently serving number {status['current_number']}, "
-        f"next number expected around {status['expected_time']}."
+        f"next number expected around {_format_time_si(status['expected_time'])}."
     )
 
 
