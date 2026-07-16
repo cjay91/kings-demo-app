@@ -13,8 +13,3 @@ __pycache__/
 Dockerfile
 .dockerignore
 livekit.toml
-
-# The React frontend (frontend/) deploys as its own separate Vercel project
-# (root directory set to frontend/ there) -- keep its node_modules/ especially
-# out of this project's build entirely.
-frontend/

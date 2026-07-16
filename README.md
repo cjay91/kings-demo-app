@@ -200,9 +200,20 @@ involved. `public/index.html` still exists for local dev only (`python -m
 http.server`); if you edit the client, update both copies.
 `requirements.lock` stays out of what Vercel installs via `.vercelignore`,
 since the agent's dependencies (livekit-agents, Google plugins) are
-unrelated and much heavier. `frontend/` is excluded too (see Part 3) —
-its `node_modules` has no business anywhere near this Python function's
-build.
+unrelated and much heavier.
+
+`.vercelignore` deliberately does **not** exclude `frontend/` (a fix after
+initially getting this wrong) — `.vercelignore` at the repo root applies
+to every Vercel project sharing this repo, not just this one, so excluding
+it broke the frontend project's *own* build in Part 3 (`vite: command not
+found`, since its `package.json`/`index.html` etc. got stripped before
+`npm install` ever ran). No exclusion was needed anyway: `frontend/`'s
+only heavy content (`node_modules`, `dist`) is already gitignored, so it
+never reaches Vercel's clone of the repo regardless of this file. All
+that's left in `frontend/` from this project's point of view is a handful
+of small JSX/CSS/config files, which its Python-based build logic
+(triggered by `requirements.txt`/`pyproject.toml`/`Pipfile`) ignores
+entirely.
 
 This app also has CORS enabled (wide open — it only ever hands out a
 scoped, short-lived room token, nothing sensitive to leak), since the
