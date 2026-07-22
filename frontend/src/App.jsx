@@ -16,11 +16,7 @@ function App() {
 
       <main className="hero">
         <p className="hero__eyebrow">සිංහල හඬ සහායක</p>
-        <h1 className="hero__title">
-          අද ඔබට කුමන ආකාරයෙන්
-          <br />
-          උදව් කළ හැකිද?
-        </h1>
+        <h1 className="hero__title">අද ඔබට කුමන ආකාරයෙන් උදව් කළ හැකිද?</h1>
         <p className="hero__subtitle">
           වෛද්‍යවරයෙකු සොයන්න, ලබා ගත හැකි වේලාවන් බලන්න, හෝ පෝලිම් අංකය විමසන්න —
           දුරකථනයෙන් කතා කරන ආකාරයටම, සිංහලෙන්.
