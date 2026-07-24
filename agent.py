@@ -26,27 +26,30 @@ credentials:
   apply. Needs GOOGLE_SERVICE_ACCOUNT_JSON (see below); Azure doesn't.
 - LLM: Gemini 2.5 Flash as a plain text model -- no realtime/audio
   involved here, just normal chat completion + tool-calling.
-- TTS: GeminiTTS (livekit.plugins.google.beta), wrapped in a
-  tts.FallbackAdapter with "gemini-3.1-flash-tts-preview" (best voice
-  quality) as primary and "gemini-2.5-flash-preview-tts" as fallback.
-  Both confirmed working via live API calls with just GOOGLE_API_KEY, no
-  Vertex AI needed -- a DIFFERENT code path than google.TTS(model_name=...),
-  which routes through Vertex AI's Agent Platform API and fails without it
-  enabled.
+- TTS: Azure Speech (si-LK-ThiliniNeural), wrapped in a
+  tts.FallbackAdapter with GeminiTTS ("gemini-2.5-flash-preview-tts") as
+  a secondary. Switched from Gemini-primary after live testing found
+  BOTH Gemini TTS models ("gemini-3.1-flash-tts-preview" and
+  "gemini-2.5-flash-preview-tts") took 8-10 seconds to synthesize even
+  the short greeting line -- direct curl timing against the Gemini API
+  confirmed this is inherent to the API right now (matches the "high
+  demand" 503s seen earlier), not a one-off. That's long enough that a
+  caller hears nothing and hangs up before the audio ever arrives --
+  confirmed live: two separate test calls both showed a
+  CLIENT_INITIATED disconnect ~15s after the TTS request started, with
+  no error logged, because the request just hadn't finished yet. Azure
+  TTS synthesizing the same greeting text measured at ~1.5s in a direct
+  timed curl test -- a GA product, not a quota-capped preview model, and
+  it already has two real si-LK neural voices (ThiliniNeural/female,
+  SameeraNeural/male) confirmed via the Speech API's voices/list
+  endpoint. GeminiTTS is kept as the FallbackAdapter's secondary rather
+  than removed, in case Azure Speech has its own outage.
 
-  The fallback exists because "gemini-3.1-flash-tts-preview" has a hard
-  cap of 100 requests/DAY on the Gemini API free tier (confirmed via a
-  live 429 RESOURCE_EXHAUSTED error) -- ran out from testing, and no
-  amount of retrying gets past it; the response said "retry in 20h17m".
-  Preview/experimental models seem to get this kind of low fixed quota
-  regardless of billing tier, unlike GA models. Quotas are tracked per
-  model name, so "gemini-2.5-flash-preview-tts" is a separate (also
-  likely capped, but usually less exhausted) bucket -- confirmed the
-  FallbackAdapter actually falls through to it live, while the primary
-  was mid-quota-exhaustion. If BOTH get exhausted on the same day, that's
-  the pattern to expect again, not a new bug -- consider a non-Gemini
-  TTS provider (Azure TTS, matching the STT provider) if this keeps
-  happening.
+  Earlier note, kept for context: "gemini-3.1-flash-tts-preview" also
+  has a hard cap of 100 requests/DAY on the Gemini API free tier
+  (confirmed via a live 429 RESOURCE_EXHAUSTED error, "retry in
+  20h17m") -- preview/experimental models seem to get this kind of low
+  fixed quota regardless of billing tier, unlike GA models.
 
 GOOGLE_SERVICE_ACCOUNT_JSON holds the Cloud service account key's full
 JSON content as a single-line string (not a file path) -- passed straight
@@ -155,10 +158,11 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
         tts=FallbackAdapter(
             [
-                GeminiTTS(
-                    model="gemini-3.1-flash-tts-preview",
-                    voice_name="Kore",
-                    api_key=os.environ["GOOGLE_API_KEY"],
+                azure.TTS(
+                    voice="si-LK-ThiliniNeural",
+                    language="si-LK",
+                    speech_key=os.environ["AZURE_API_KEY"],
+                    speech_region=os.environ["AZURE_REGION"],
                 ),
                 GeminiTTS(
                     model="gemini-2.5-flash-preview-tts",
