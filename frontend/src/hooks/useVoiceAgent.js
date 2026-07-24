@@ -20,6 +20,7 @@ export function useVoiceAgent() {
   const [errorMessage, setErrorMessage] = useState(null);
   const [transcript, setTranscript] = useState([]);
   const [activeSpeaker, setActiveSpeaker] = useState(null); // "patient" | "agent" | null
+  const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
 
   const roomRef = useRef(null);
   const audioElRef = useRef(null);
@@ -28,6 +29,7 @@ export function useVoiceAgent() {
     setStatus(CallStatus.CONNECTING);
     setErrorMessage(null);
     setTranscript([]);
+    setNeedsAudioUnlock(false);
 
     try {
       const res = await fetch(TOKEN_ENDPOINT);
@@ -44,6 +46,15 @@ export function useVoiceAgent() {
           audioElRef.current = el;
           document.body.appendChild(el);
         }
+      });
+
+      // Browsers often block autoplay of the agent's audio track until a
+      // user gesture unlocks it. LiveKit detects this and flips
+      // canPlaybackAudio to false, firing this event -- surface it so the
+      // UI can prompt the caller to tap a button (a fresh gesture) that
+      // calls room.startAudio() to retry playback.
+      room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+        setNeedsAudioUnlock(!room.canPlaybackAudio);
       });
 
       room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
@@ -80,6 +91,7 @@ export function useVoiceAgent() {
       await room.localParticipant.setMicrophoneEnabled(true);
 
       setStatus(CallStatus.CONNECTED);
+      setNeedsAudioUnlock(!room.canPlaybackAudio);
     } catch (err) {
       setStatus(CallStatus.ERROR);
       setErrorMessage(err instanceof Error ? err.message : String(err));
@@ -98,7 +110,24 @@ export function useVoiceAgent() {
     }
     setStatus(CallStatus.IDLE);
     setActiveSpeaker(null);
+    setNeedsAudioUnlock(false);
   }, []);
 
-  return { status, errorMessage, transcript, activeSpeaker, connect, disconnect };
+  const unlockAudio = useCallback(async () => {
+    if (roomRef.current) {
+      await roomRef.current.startAudio();
+      setNeedsAudioUnlock(!roomRef.current.canPlaybackAudio);
+    }
+  }, []);
+
+  return {
+    status,
+    errorMessage,
+    transcript,
+    activeSpeaker,
+    needsAudioUnlock,
+    connect,
+    disconnect,
+    unlockAudio,
+  };
 }

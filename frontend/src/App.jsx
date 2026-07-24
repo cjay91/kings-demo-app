@@ -6,7 +6,16 @@ import { Transcript } from "./components/Transcript";
 import { CallStatus, useVoiceAgent } from "./hooks/useVoiceAgent";
 
 function App() {
-  const { status, errorMessage, transcript, activeSpeaker, connect, disconnect } = useVoiceAgent();
+  const {
+    status,
+    errorMessage,
+    transcript,
+    activeSpeaker,
+    needsAudioUnlock,
+    connect,
+    disconnect,
+    unlockAudio,
+  } = useVoiceAgent();
 
   const isIdle = status === CallStatus.IDLE || status === CallStatus.ERROR;
 
@@ -26,6 +35,11 @@ function App() {
           <CallButton status={status} onConnect={connect} onDisconnect={disconnect} />
           <StatusPill status={status} activeSpeaker={activeSpeaker} errorMessage={errorMessage} />
           {isIdle && <p className="call-panel__hint">ඇමතුම ආරම්භ කිරීමට ඉහත බොත්තම ඔබන්න</p>}
+          {needsAudioUnlock && (
+            <button type="button" className="audio-unlock-btn" onClick={unlockAudio}>
+              🔊 හඬ සක්‍රීය කිරීමට ඔබන්න
+            </button>
+          )}
         </div>
 
         <Transcript messages={transcript} />
