@@ -16,10 +16,14 @@ This replaced two earlier attempts:
 
 Current setup, confirmed via live TTS->STT roundtrip testing with real
 credentials:
-- STT: Azure Speech (si-LK) -- accepts the language and transcribes real
-  audio, though not perfectly (a synthetic-audio roundtrip test produced
-  2 word-level misses out of ~7 words, including one semantic miss --
-  worth judging against real speech, not just this one data point).
+- STT: Azure Speech (si-LK) by default -- accepts the language and
+  transcribes real audio, though not perfectly (a synthetic-audio
+  roundtrip test produced 2 word-level misses out of ~7 words, including
+  one semantic miss -- worth judging against real speech, not just this
+  one data point). Set STT_PROVIDER=chirp (or "google") to switch to
+  Google Cloud Speech-to-Text's chirp_2 model instead, for side-by-side
+  comparison -- confirmed working via live testing, same si-LK caveats
+  apply. Needs GOOGLE_SERVICE_ACCOUNT_JSON (see below); Azure doesn't.
 - LLM: Gemini 2.5 Flash as a plain text model -- no realtime/audio
   involved here, just normal chat completion + tool-calling.
 - TTS: GeminiTTS (livekit.plugins.google.beta), wrapped in a
@@ -44,11 +48,21 @@ credentials:
   TTS provider (Azure TTS, matching the STT provider) if this keeps
   happening.
 
+GOOGLE_SERVICE_ACCOUNT_JSON holds the Cloud service account key's full
+JSON content as a single-line string (not a file path) -- passed straight
+to google.STT(credentials_info=...) as a parsed dict. This avoids relying
+on a credentials *file* existing inside the deployed container, which
+would either need baking the key into the Docker image (a real risk
+already hit once with .dockerignore not excluding it by default) or a
+secret-file mount; a plain string secret sidesteps both and matches how
+every other credential here already works.
+
 Run:
     python agent.py dev      # connects to LiveKit, waits for a room to join
     python agent.py console  # local mic/speaker test, no LiveKit room needed
 """
 
+import json
 import os
 
 from dotenv import load_dotenv
@@ -95,6 +109,28 @@ class HospitalAgent(Agent):
         super().__init__(instructions=SYSTEM_PROMPT, tools=HOSPITAL_TOOLS)
 
 
+def build_stt():
+    """STT_PROVIDER=chirp (or "google") switches to Google Cloud
+    Speech-to-Text's chirp_2 model; anything else (including unset)
+    defaults to Azure. location="us-central1" is required -- chirp
+    models aren't available in "global", and chirp_3 (tried first,
+    before chirp_2) explicitly rejects si-LK as unsupported."""
+    provider = os.environ.get("STT_PROVIDER", "azure").lower()
+    if provider in ("chirp", "google"):
+        return google.STT(
+            languages="si-LK",
+            model="chirp_2",
+            location="us-central1",
+            detect_language=False,
+            credentials_info=json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]),
+        )
+    return azure.STT(
+        speech_key=os.environ["AZURE_API_KEY"],
+        speech_region=os.environ["AZURE_REGION"],
+        language="si-LK",
+    )
+
+
 async def entrypoint(ctx: JobContext) -> None:
     # Re-seed every job rather than relying on hospital.db already being
     # present in the deployed container -- it's git-ignored, and whether a
@@ -108,11 +144,7 @@ async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
 
     session = AgentSession(
-        stt=azure.STT(
-            speech_key=os.environ["AZURE_API_KEY"],
-            speech_region=os.environ["AZURE_REGION"],
-            language="si-LK",
-        ),
+        stt=build_stt(),
         llm=google.LLM(
             model="gemini-2.5-flash",
             api_key=os.environ["GOOGLE_API_KEY"],

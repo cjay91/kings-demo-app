@@ -87,12 +87,16 @@ Deployment below for why it's named `.lock` instead of the more obvious
 - **LiveKit**: create a free project at https://cloud.livekit.io — you need
   the project URL, API key, and API secret. (Self-hosting is also an option;
   point `LIVEKIT_URL` at your own server instead.)
-- **Gemini**: get an API key from https://aistudio.google.com/apikey — this
-  is the *only* Google credential needed. `agent.py` uses it for both the
-  LLM and TTS (`GeminiTTS`), no Google Cloud service account required.
+- **Gemini**: get an API key from https://aistudio.google.com/apikey — the
+  only Google credential needed for the LLM and TTS (`GeminiTTS`), no
+  Google Cloud service account required for those.
 - **Azure Speech**: in the [Azure Portal](https://portal.azure.com), create
   a "Speech" resource, then grab its key and region from "Keys and
-  Endpoint". Used for STT only.
+  Endpoint". This is the default STT provider.
+- **Google Cloud service account** (optional): only needed if you want to
+  try `STT_PROVIDER=chirp` (Google Cloud Speech-to-Text's `chirp_2` model)
+  instead of Azure — see `.env.example` for where to get one and how to
+  format it. Skip this entirely if you're sticking with Azure STT.
 
 Copy `.env.example` to `.env` and fill in all values:
 
@@ -278,8 +282,9 @@ container image. It's excluded here now, but if you ever hand-run
 `lk agent create` again and it regenerates `.dockerignore`, check that
 line survived.
 
-Set secrets (these become the container's environment variables) — no
-Google Cloud service account needed, just the Gemini and Azure keys:
+Set secrets (these become the container's environment variables) — just
+the Gemini and Azure keys for the default setup, no Google Cloud service
+account needed:
 
 ```bash
 lk agent update-secrets --secrets "GOOGLE_API_KEY=your_gemini_key,AZURE_API_KEY=your_azure_key,AZURE_REGION=your_azure_region"
@@ -287,10 +292,22 @@ lk agent update-secrets --secrets "GOOGLE_API_KEY=your_gemini_key,AZURE_API_KEY=
 
 Or point `--secrets-file` at your local `.env` instead, which picks up
 everything at once (including a couple of harmless extras like
-`TOKEN_SERVER_PORT` that the agent doesn't use):
+`TOKEN_SERVER_PORT` that the agent doesn't use, and `GOOGLE_SERVICE_ACCOUNT_JSON`
++ `STT_PROVIDER` if you've set those up for the Chirp STT option):
 
 ```bash
 lk agent update-secrets --secrets-file .env --overwrite
+```
+
+**Switching the deployed agent's STT provider** without a full redeploy:
+`STT_PROVIDER` is just another secret, so updating it alone (which
+restarts the agent, per `update-secrets`' own behavior) is enough —
+no code change or `lk agent deploy` needed:
+
+```bash
+lk agent update-secrets --secrets "STT_PROVIDER=chirp" --overwrite
+# ...or back to the default:
+lk agent update-secrets --secrets "STT_PROVIDER=azure" --overwrite
 ```
 
 Then create and deploy:
@@ -362,16 +379,17 @@ here too and are the reason this is a sample, not production-ready:
   voice, accent, and background noise needs real judgment, not just
   `agent.py console`, which was itself only checked for whether it
   connects, not for output quality.
-- **Google's Cloud Speech-to-Text and Text-to-Speech products were
-  dropped, not just swapped out casually** — worth knowing if you're
-  tempted to switch back. Cloud TTS has zero voices for Sinhala at all
-  (`list_voices()` confirmed it, not a naming issue). Cloud STT does
-  accept `si-LK`, but only via the `chirp_2` model outside
-  `location="global"` — `chirp_3` explicitly rejects the language. The
-  Gemini Live API (`RealtimeModel`, tried as a single-model alternative)
+- **Google's Cloud Text-to-Speech was dropped entirely, not just swapped
+  out casually** — worth knowing if you're tempted to switch back.
+  `list_voices()` confirmed **zero** voices for Sinhala; not a naming
+  issue, the product doesn't support the language at all. The Gemini Live
+  API (`RealtimeModel`, tried as a single-model STT+LLM+TTS alternative)
   also hard-rejects `si-LK`/`si` as a language code, and leaving it unset
-  made tool calls hang indefinitely. None of these are fixed by minor
-  config changes — they're the reason the architecture is what it is now.
+  made tool calls hang indefinitely. Neither is fixed by a minor config
+  change. Cloud **Speech-to-Text**, on the other hand, does work — it's
+  the `STT_PROVIDER=chirp` option (`chirp_2` model, `location="us-central1"`;
+  `chirp_3` explicitly rejects `si-LK`, so don't switch to it expecting
+  it to just work).
 - **Gemini TTS models have small, fixed daily quotas that don't scale
   with billing tier** — hit this live: `gemini-3.1-flash-tts-preview`
   capped at 100 requests/day on the free tier, confirmed via a 429
