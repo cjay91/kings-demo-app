@@ -401,15 +401,26 @@ here too and are the reason this is a sample, not production-ready:
   exhausted on the same day, expect the same symptom again. A non-Gemini
   TTS provider (e.g. Azure TTS, matching the STT provider) would sidestep
   this entirely if it becomes a recurring problem.
-- **Doctor name/specialty matching is substring-only, not fuzzy or
-  phonetic.** Seed data has both English and Sinhala name/specialty
-  columns (`db.py`'s `doc_name_si`/`specialty_si`) specifically because
-  Sinhala speakers say names in Sinhala script, which won't `LIKE`-match
-  English text — that part's fixed. But it's still exact substring
-  matching: a mispronounced or STT-mistranscribed name/specialty (a real
-  risk given the STT accuracy caveat above) simply won't match anything,
-  and the agent will incorrectly tell the caller no such doctor exists.
-  A real system would want fuzzy/phonetic matching here.
+- **Doctor name matching is fuzzy; specialty matching deliberately isn't
+  — and that asymmetry is intentional, not an oversight.** Seed data has
+  both English and Sinhala columns (`db.py`'s `doc_name_si`/`specialty_si`)
+  since Sinhala speakers say names/specialties in Sinhala script, which
+  won't `LIKE`-match English text. For names, `search_doctors_by_name`
+  falls back to `rapidfuzz` fuzzy matching when the exact substring match
+  finds nothing — tested and confirmed to separate cleanly (legitimate
+  partial/near-miss names score 90-100 on `partial_ratio`; the worst-case
+  similarity between two *different* doctors' names tops out around 65).
+  Specialty matching stays exact-only on purpose: most specialty terms
+  share a common trailing word ("රෝග" / disease), so fuzzy-matching them
+  the same way can't reliably tell a genuine near-miss from a completely
+  wrong specialty — both land in the same ~65-77 similarity band,
+  confirmed against the actual "විරුද්ධ රෝග" (heard for "හෘද රෝග") STT
+  error caught in testing, which fuzzy-matched *other*, wrong specialties
+  just as confidently as the right one. When specialty search misses, the
+  tool returns the full specialty list instead of guessing. When name
+  search falls back to fuzzy, the result is marked "approximate", and the
+  system prompt tells the agent to confirm the name with the caller
+  before proceeding rather than stating it with full confidence.
 - **Database is mocked and static.** No write path, no concurrency handling,
   no real slot-booking — it only supports the 4 read-style lookups.
   `agent.py` re-seeds it fresh on every job (see Deployment Part 2 for

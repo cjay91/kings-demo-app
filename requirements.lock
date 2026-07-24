@@ -3,3 +3,4 @@ livekit-plugins-google==1.6.5
 livekit-plugins-azure==1.6.5
 livekit-plugins-openai==1.6.5
 python-dotenv==1.2.2
+rapidfuzz==3.14.5

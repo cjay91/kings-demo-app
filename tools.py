@@ -49,18 +49,27 @@ async def search_consultants(context: RunContext, query: str) -> str:
         query: The doctor's name or the specialty to search for.
     """
     results = db.search_doctors_by_specialty(query)
+    is_fuzzy = False
     if not results:
-        results = db.search_doctors_by_name(query)
+        results, is_fuzzy = db.search_doctors_by_name(query)
 
     if not results:
-        return f"No consultants found matching '{query}'."
+        specialties = db.get_all_specialties()
+        available = ", ".join(f"{s['specialty_si']} ({s['specialty']})" for s in specialties)
+        return f"No consultants found matching '{query}'. Available specialties: {available}."
 
+    prefix = (
+        "Found consultants (approximate name match -- confirm the name with "
+        "the caller before proceeding):\n"
+        if is_fuzzy
+        else "Found consultants:\n"
+    )
     lines = [
         f"{d['doc_name_si']} / {d['doc_name']} ({d['specialty_si']} / {d['specialty']}) "
         f"- {d['qualifications']}"
         for d in results
     ]
-    return "Found consultants:\n" + "\n".join(lines)
+    return prefix + "\n".join(lines)
 
 
 @function_tool()
@@ -76,17 +85,22 @@ async def get_doctor_sessions(
         doctor_name: The doctor's name as mentioned by the caller.
         date: Optional date to filter by. Accepts "today", "tomorrow", or YYYY-MM-DD.
     """
-    matches = db.search_doctors_by_name(doctor_name)
+    matches, is_fuzzy = db.search_doctors_by_name(doctor_name)
     if not matches:
         return f"No doctor found matching '{doctor_name}'."
 
     doc = matches[0]
+    fuzzy_note = (
+        " (approximate name match -- confirm with the caller that this is who they meant)"
+        if is_fuzzy
+        else ""
+    )
     resolved_date = _relative_date(date) if date else None
     sessions = db.get_sessions_for_doctor(doc["doc_id"], resolved_date)
 
     if not sessions:
         scope = f" on {resolved_date}" if resolved_date else ""
-        return f"{doc['doc_name_si']} / {doc['doc_name']} has no available sessions{scope}."
+        return f"{doc['doc_name_si']} / {doc['doc_name']}{fuzzy_note} has no available sessions{scope}."
 
     lines = [
         f"Session {s['session_id']}: {s['session_date']} at {_format_time_si(s['start_time'])} "
@@ -94,7 +108,7 @@ async def get_doctor_sessions(
         for s in sessions
     ]
     return (
-        f"{doc['doc_name_si']} / {doc['doc_name']} ({doc['specialty_si']} / {doc['specialty']}) "
+        f"{doc['doc_name_si']} / {doc['doc_name']} ({doc['specialty_si']} / {doc['specialty']}){fuzzy_note} "
         "sessions:\n" + "\n".join(lines)
     )
 

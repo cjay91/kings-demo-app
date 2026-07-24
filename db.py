@@ -9,7 +9,16 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+from rapidfuzz import fuzz
+
 DB_PATH = Path(__file__).parent / "hospital.db"
+
+# Only used for name matching, deliberately NOT specialty matching -- see
+# search_doctors_by_specialty for why. Confirmed via testing: legitimate
+# partial/near-miss doctor names score 90-100 here, while the worst-case
+# similarity between two DIFFERENT doctors' names tops out around 65, so
+# there's a clean gap to threshold on.
+NAME_FUZZY_THRESHOLD = 80
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS doctors (
@@ -67,20 +76,59 @@ def init_db(reset: bool = False):
         conn.executescript(SCHEMA)
 
 
-def search_doctors_by_name(name: str):
+def search_doctors_by_name(name: str) -> tuple[list[dict], bool]:
+    """Returns (matches, is_fuzzy). Tries an exact substring match first;
+    if that finds nothing, falls back to fuzzy matching (rapidfuzz
+    partial_ratio) against both the English and Sinhala names, so a
+    mistranscribed or partial name (e.g. STT noise, or just a first name)
+    still resolves. is_fuzzy tells the caller the match is approximate,
+    so the agent can confirm it with the caller instead of stating it with
+    full confidence -- see tools.py."""
     with get_conn() as conn:
-        rows = conn.execute(
+        exact = conn.execute(
             "SELECT * FROM doctors WHERE doc_name LIKE ? OR doc_name_si LIKE ?",
             (f"%{name}%", f"%{name}%"),
         ).fetchall()
-        return [dict(r) for r in rows]
+    if exact:
+        return [dict(r) for r in exact], False
+
+    with get_conn() as conn:
+        all_doctors = [dict(r) for r in conn.execute("SELECT * FROM doctors").fetchall()]
+
+    scored = [
+        (max(fuzz.partial_ratio(name, d["doc_name"]), fuzz.partial_ratio(name, d["doc_name_si"])), d)
+        for d in all_doctors
+    ]
+    scored = [(score, d) for score, d in scored if score >= NAME_FUZZY_THRESHOLD]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [d for _, d in scored], True
 
 
-def search_doctors_by_specialty(specialty: str):
+def search_doctors_by_specialty(specialty: str) -> list[dict]:
+    """Exact substring match only -- deliberately NOT fuzzy, unlike
+    search_doctors_by_name. Tested and rejected: most specialty terms
+    share a common trailing word ("රෝග" / disease), so character-similarity
+    fuzzy matching can't reliably tell a genuine near-miss from a
+    completely different, wrong specialty -- both land in the same ~65-77
+    similarity band. Confirmed with the actual STT error seen in testing
+    ("විරුද්ධ රෝග" heard for "හෘද රෝග"), which fuzzy-matched other, wrong
+    specialties just as confidently as the correct one. Safer to return
+    nothing (see get_all_specialties for the fallback) than to silently
+    guess wrong."""
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM doctors WHERE specialty LIKE ? OR specialty_si LIKE ?",
             (f"%{specialty}%", f"%{specialty}%"),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_all_specialties() -> list[dict]:
+    """All distinct specialties, to offer a caller the full list when
+    their specialty query didn't match anything exactly."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT specialty, specialty_si FROM doctors ORDER BY specialty"
         ).fetchall()
         return [dict(r) for r in rows]
 
