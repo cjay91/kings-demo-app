@@ -55,9 +55,13 @@ app.add_middleware(
 # EXACT same room -- so the room never emptied out (and the agent job never
 # closed) as long as anyone, anywhere, was connected, and separate testers
 # could even end up talking over each other. Each caller now gets their own
-# room instead, named from the same client_id used for identity above, so a
-# session is actually isolated and closes when that one caller leaves. The
-# agent worker has no agent_name/dispatch-rule restriction (see agent.py's
+# room instead, named from client_id (a fresh id the frontend generates on
+# every single connect() call -- NOT persisted across a refresh, see
+# useVoiceAgent.js). Reusing the same room name across a refresh was tried
+# first and rejected: LiveKit only auto-dispatches an agent the FIRST time a
+# room is created, so reconnecting to an already-used room silently got no
+# agent at all. A fresh room every time sidesteps that entirely. The agent
+# worker has no agent_name/dispatch-rule restriction (see agent.py's
 # WorkerOptions), so it accepts a job for any new room automatically --
 # nothing else needs to change for this to work.
 ROOM_PREFIX = "kings-hospital"
@@ -199,18 +203,11 @@ def index():
 
 @app.get("/api/livekit_token")
 def get_token(client_id: str | None = Query(default=None)):
-    # client_id is a per-browser-tab id the frontend persists in
-    # sessionStorage, so a page refresh/reconnect reuses the SAME identity
-    # instead of generating a fresh random one every time. LiveKit's room
-    # server disconnects any EXISTING participant with the same identity
-    # when a new connection joins under it (DUPLICATE_IDENTITY), so this
-    # is what actually cleans up a stale connection left behind by a
-    # refresh -- confirmed via the LiveKit Cloud dashboard's Sessions view
-    # showing a single room accumulating 5 participants over one 6-minute
-    # call, i.e. old connections from repeated reconnects were never being
-    # replaced, just piling up. Falls back to a random identity if the
-    # frontend doesn't send one (older cached frontend build, or a
-    # non-browser client) or sends something outside the expected shape.
+    # client_id is a fresh id the frontend generates on every connect() call
+    # (see useVoiceAgent.js) -- used to derive both the identity and the
+    # per-caller room name below. Falls back to a random one if the frontend
+    # doesn't send one (older cached frontend build, or a non-browser
+    # client) or sends something outside the expected shape.
     if client_id and CLIENT_ID_RE.match(client_id):
         suffix = client_id
     else:

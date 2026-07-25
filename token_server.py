@@ -37,9 +37,10 @@ CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 @app.get("/token")
 def token(client_id: str | None = Query(default=None)):
-    # Mirrors api/index.py -- each caller gets their own room (named from the
-    # same client_id the React frontend persists per tab), not one shared
-    # hardcoded room, so local dev matches production behavior.
+    # Mirrors api/index.py -- each caller gets their own room (named from a
+    # fresh client_id generated on every connect(), not persisted across a
+    # refresh -- see useVoiceAgent.js), not one shared hardcoded room, so
+    # local dev matches production behavior.
     if client_id and CLIENT_ID_RE.match(client_id):
         suffix = client_id
     else:

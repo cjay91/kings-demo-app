@@ -2,21 +2,18 @@ import { useCallback, useRef, useState } from "react";
 import { Room, RoomEvent } from "livekit-client";
 
 const TOKEN_ENDPOINT = import.meta.env.VITE_TOKEN_ENDPOINT;
-const CLIENT_ID_KEY = "kh_client_id";
 
-// Persisted in sessionStorage (survives a refresh, cleared when the tab
-// closes) so reconnecting in the same tab reuses the same LiveKit identity.
-// The server then joins under "patient-<this id>" every time -- LiveKit
-// disconnects any existing participant with that same identity when a new
-// one joins, which is what actually cleans up a stale connection left
-// behind by a refresh instead of letting it pile up in the room.
+// A fresh id every single connect() call, NOT persisted across a refresh.
+// Room name is derived from this on the server (see /api/livekit_token), and
+// LiveKit only auto-dispatches an agent to a room the FIRST time it's
+// created -- reusing the same room name (e.g. via a sessionStorage-persisted
+// id) across a refresh meant the reconnect landed in a room LiveKit didn't
+// consider "new", so no agent job ever got dispatched and the caller got
+// silence. Since every connect() now gets its own never-reused room, there's
+// also no other participant it could ever collide with, so there's no need
+// to keep a stable identity around for de-duplication purposes either.
 function getClientId() {
-  let id = sessionStorage.getItem(CLIENT_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    sessionStorage.setItem(CLIENT_ID_KEY, id);
-  }
-  return id;
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 16);
 }
 
 export const CallStatus = {
@@ -113,13 +110,12 @@ export function useVoiceAgent() {
       await room.connect(url, token);
       await room.localParticipant.setMicrophoneEnabled(true);
 
-      // A refresh/tab-close only reuses the same LiveKit identity (see
-      // getClientId above) if the OLD connection actually leaves the room --
-      // otherwise it just sits there until the server times it out on its
-      // own. `pagehide` fires reliably for both a refresh and a tab close
-      // (unlike `beforeunload`, which browsers increasingly ignore/restrict
-      // for bfcache reasons), so send an explicit disconnect there rather
-      // than leaving it to a dead socket to eventually get noticed.
+      // Without this, a refresh/tab-close leaves the OLD connection sitting
+      // in its (now-abandoned) room until the server eventually notices the
+      // dead socket. `pagehide` fires reliably for both a refresh and a tab
+      // close (unlike `beforeunload`, which browsers increasingly
+      // ignore/restrict for bfcache reasons), so send an explicit disconnect
+      // there instead of waiting on that.
       const handlePageHide = () => {
         room.disconnect();
       };
