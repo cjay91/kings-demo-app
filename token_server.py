@@ -10,11 +10,12 @@ Then open public/index.html (it calls http://localhost:8080/token).
 """
 
 import os
+import re
 import uuid
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from livekit import api
 
@@ -30,24 +31,34 @@ app.add_middleware(
 LIVEKIT_API_KEY = os.environ["LIVEKIT_API_KEY"]
 LIVEKIT_API_SECRET = os.environ["LIVEKIT_API_SECRET"]
 LIVEKIT_URL = os.environ["LIVEKIT_URL"]
-ROOM_NAME = "kings-hospital-demo"
+ROOM_PREFIX = "kings-hospital"
+CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 @app.get("/token")
-def token():
-    identity = f"patient-{uuid.uuid4().hex[:8]}"
+def token(client_id: str | None = Query(default=None)):
+    # Mirrors api/index.py -- each caller gets their own room (named from the
+    # same client_id the React frontend persists per tab), not one shared
+    # hardcoded room, so local dev matches production behavior.
+    if client_id and CLIENT_ID_RE.match(client_id):
+        suffix = client_id
+    else:
+        suffix = uuid.uuid4().hex[:8]
+
+    identity = f"patient-{suffix}"
+    room_name = f"{ROOM_PREFIX}-{suffix}"
 
     access_token = (
         api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
         .with_identity(identity)
         .with_name(identity)
-        .with_grants(api.VideoGrants(room_join=True, room=ROOM_NAME))
+        .with_grants(api.VideoGrants(room_join=True, room=room_name))
     )
 
     return {
         "token": access_token.to_jwt(),
         "url": LIVEKIT_URL,
-        "room": ROOM_NAME,
+        "room": room_name,
         "identity": identity,
     }
 

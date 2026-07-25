@@ -51,7 +51,16 @@ app.add_middleware(
     allow_methods=["GET"],
 )
 
-ROOM_NAME = "kings-hospital-demo"
+# A shared, hardcoded room name meant every browser tab/tester joined the
+# EXACT same room -- so the room never emptied out (and the agent job never
+# closed) as long as anyone, anywhere, was connected, and separate testers
+# could even end up talking over each other. Each caller now gets their own
+# room instead, named from the same client_id used for identity above, so a
+# session is actually isolated and closes when that one caller leaves. The
+# agent worker has no agent_name/dispatch-rule restriction (see agent.py's
+# WorkerOptions), so it accepts a job for any new room automatically --
+# nothing else needs to change for this to work.
+ROOM_PREFIX = "kings-hospital"
 
 INDEX_HTML = """<!doctype html>
 <html lang="en">
@@ -203,20 +212,23 @@ def get_token(client_id: str | None = Query(default=None)):
     # frontend doesn't send one (older cached frontend build, or a
     # non-browser client) or sends something outside the expected shape.
     if client_id and CLIENT_ID_RE.match(client_id):
-        identity = f"patient-{client_id}"
+        suffix = client_id
     else:
-        identity = f"patient-{uuid.uuid4().hex[:8]}"
+        suffix = uuid.uuid4().hex[:8]
+
+    identity = f"patient-{suffix}"
+    room_name = f"{ROOM_PREFIX}-{suffix}"
 
     access_token = (
         api.AccessToken(os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"])
         .with_identity(identity)
         .with_name(identity)
-        .with_grants(api.VideoGrants(room_join=True, room=ROOM_NAME))
+        .with_grants(api.VideoGrants(room_join=True, room=room_name))
     )
 
     return {
         "token": access_token.to_jwt(),
         "url": os.environ["LIVEKIT_URL"],
-        "room": ROOM_NAME,
+        "room": room_name,
         "identity": identity,
     }

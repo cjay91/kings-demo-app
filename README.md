@@ -331,15 +331,17 @@ Once both parts are live, the web client creates a LiveKit room via
 that room dispatch automatically — same flow as local dev, just with both
 halves running remotely instead of on your machine.
 
-**A gotcha specific to testing this manually**: the room name is
-hardcoded (`kings-hospital-demo`, see "Known risks"), and LiveKit only
-auto-dispatches an agent when a room is *newly created* — if a previous
-test's room is still alive (check with `lk room list`), reconnecting to
-it won't trigger a fresh dispatch, and the agent will look like it's not
-responding at all. Run `lk room delete kings-hospital-demo` before each
-fresh test to be safe. Also useful: `lk agent logs` for a live tail of
-what the agent is actually doing (it appears to only show activity from
-the moment you run it, not history — start it *before* you connect, not
+**A gotcha this used to have**: the room name used to be hardcoded
+(`kings-hospital-demo`), and LiveKit only auto-dispatches an agent when a
+room is *newly created* — a previous test's still-alive room silently ate
+new connections with no fresh dispatch, and the agent looked like it
+wasn't responding at all. Fixed by giving each browser tab its own room
+(named from a `client_id` persisted in sessionStorage — see
+`/api/livekit_token`), so a fresh connection always gets a fresh room and
+this can't happen anymore. Still useful for manual testing: `lk room list`
+to see what's currently alive, and `lk agent logs` for a live tail of what
+the agent is actually doing (it appears to only show activity from the
+moment you run it, not history — start it *before* you connect, not
 after).
 
 ### Part 3 — React frontend on Vercel
@@ -432,7 +434,11 @@ here too and are the reason this is a sample, not production-ready:
 - **No auth on the token endpoint** — anyone who can reach `/token` (local)
   or `/api/livekit_token` (deployed) gets a room token. Fine for a demo;
   would need real patient auth before any real deployment.
-- **Single hardcoded room** (`kings-hospital-demo`) — every browser session
-  joins the same room, so only test with one caller at a time. Also means
-  a leftover room from a previous test can block a fresh agent dispatch —
-  see the gotcha note in Deployment Part 2.
+- ~~Single hardcoded room~~ — fixed: each browser tab now gets its own
+  room, named from a `client_id` persisted in `sessionStorage` (same id
+  used for the participant identity, see `/api/livekit_token` and
+  `token_server.py`). A refresh in the same tab reuses its room; a
+  different tab/device gets a fresh, isolated one. This also fixed a
+  related bug where a room never closed as long as *any* tab anywhere was
+  connected to the shared name, and separate testers could end up in the
+  same conversation.
