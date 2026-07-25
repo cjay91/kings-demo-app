@@ -28,12 +28,15 @@ environment variables (set in the Vercel dashboard — .env is not deployed).
 """
 
 import os
+import re
 import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from livekit import api
+
+CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 app = FastAPI()
 
@@ -186,8 +189,23 @@ def index():
 
 
 @app.get("/api/livekit_token")
-def get_token():
-    identity = f"patient-{uuid.uuid4().hex[:8]}"
+def get_token(client_id: str | None = Query(default=None)):
+    # client_id is a per-browser-tab id the frontend persists in
+    # sessionStorage, so a page refresh/reconnect reuses the SAME identity
+    # instead of generating a fresh random one every time. LiveKit's room
+    # server disconnects any EXISTING participant with the same identity
+    # when a new connection joins under it (DUPLICATE_IDENTITY), so this
+    # is what actually cleans up a stale connection left behind by a
+    # refresh -- confirmed via the LiveKit Cloud dashboard's Sessions view
+    # showing a single room accumulating 5 participants over one 6-minute
+    # call, i.e. old connections from repeated reconnects were never being
+    # replaced, just piling up. Falls back to a random identity if the
+    # frontend doesn't send one (older cached frontend build, or a
+    # non-browser client) or sends something outside the expected shape.
+    if client_id and CLIENT_ID_RE.match(client_id):
+        identity = f"patient-{client_id}"
+    else:
+        identity = f"patient-{uuid.uuid4().hex[:8]}"
 
     access_token = (
         api.AccessToken(os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"])
