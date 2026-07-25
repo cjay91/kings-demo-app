@@ -72,20 +72,69 @@ Run:
     python agent.py console  # local mic/speaker test, no LiveKit room needed
 """
 
+import asyncio
 import json
 import os
 
 from dotenv import load_dotenv
 
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
+from livekit.agents import (
+    DEFAULT_API_CONNECT_OPTIONS,
+    Agent,
+    AgentSession,
+    APIConnectionError,
+    APIConnectOptions,
+    JobContext,
+    WorkerOptions,
+    cli,
+)
 from livekit.agents.tts import FallbackAdapter
 from livekit.plugins import azure, google
 from livekit.plugins.google.beta import GeminiTTS
+from livekit.plugins.google.beta.gemini_tts import ChunkedStream as _GeminiChunkedStream
 
 import seed
 from tools import HOSPITAL_TOOLS
 
 load_dotenv()
+
+# Live testing found Gemini TTS occasionally taking 15-40+ seconds with NO error
+# raised at all -- reading livekit-agents 1.6.5's ChunkedStream._main_task source
+# confirmed conn_options.timeout is accepted but never actually enforced (no
+# asyncio.wait_for anywhere around the provider call), so a hung request just hangs
+# until the caller gives up and disconnects, and FallbackAdapter never gets a
+# retryable error to react to. This wrapper enforces a real per-attempt deadline by
+# turning a timeout into a retryable APIConnectionError, which IS something
+# FallbackAdapter already knows how to react to (confirmed live: the same warning
+# log used for genuine API errors fires for this too).
+#
+# 12s, not something more aggressive like 5s: direct timed test calls against the
+# real API measured successful synthesis of the actual greeting text at 8s, 10s,
+# and 16s on different attempts. A shorter timeout would cut off legitimately
+# slow-but-working calls on BOTH the primary and secondary Gemini models (they're
+# both Gemini, both subject to the same latency), turning "slow" into "always
+# fails outright" instead of just "sometimes fails over to the other model".
+GEMINI_TTS_ATTEMPT_TIMEOUT_S = 12.0
+
+
+class _TimeoutBoundChunkedStream(_GeminiChunkedStream):
+    async def _run(self, output_emitter) -> None:
+        try:
+            await asyncio.wait_for(
+                super()._run(output_emitter), timeout=GEMINI_TTS_ATTEMPT_TIMEOUT_S
+            )
+        except asyncio.TimeoutError as e:
+            raise APIConnectionError(
+                f"gemini tts: synthesis exceeded {GEMINI_TTS_ATTEMPT_TIMEOUT_S}s timeout",
+                retryable=True,
+            ) from e
+
+
+class TimeoutBoundGeminiTTS(GeminiTTS):
+    def synthesize(
+        self, text: str, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
+    ) -> _TimeoutBoundChunkedStream:
+        return _TimeoutBoundChunkedStream(tts=self, input_text=text, conn_options=conn_options)
 
 SYSTEM_PROMPT = """
 ඔබ "King's Hospital Colombo" රෝහලේ දුරකථන හඬ නියෝජිතයෙකි (voice agent).
@@ -165,18 +214,18 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
         tts=FallbackAdapter(
             [
-                GeminiTTS(
+                TimeoutBoundGeminiTTS(
                     model="gemini-3.1-flash-tts-preview",
                     voice_name="Kore",
                     api_key=os.environ["GOOGLE_API_KEY"],
                 ),
-                GeminiTTS(
+                TimeoutBoundGeminiTTS(
                     model="gemini-2.5-flash-preview-tts",
                     voice_name="Kore",
                     api_key=os.environ["GOOGLE_API_KEY"],
                 ),
             ],
-            max_retry_per_tts=1,
+            max_retry_per_tts=0,
         ),
     )
 
