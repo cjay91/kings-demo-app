@@ -346,3 +346,103 @@
   color: var(--ink-soft);
   opacity: 0.8;
 }
+
+/* Deliberately subtle -- a hidden debug toggle, not a normal UI control.
+   No visible border/background; only a faint dot a tester would know to
+   look for, not something a real caller would ever notice or click. */
+.footer__debug-toggle {
+  margin-top: 4px;
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  opacity: 0.25;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.footer__debug-toggle:hover {
+  opacity: 0.6;
+}
+
+/* ---------- Debug panel (hidden, toggled from the footer dot) ---------- */
+
+.debug-panel {
+  margin: 0 auto 32px;
+  max-width: 360px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--font-latin);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.debug-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.debug-panel__row label {
+  width: 32px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.debug-panel__row select {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+
+.debug-panel__badge {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.debug-panel__badge--ok {
+  background: rgba(27, 150, 141, 0.15);
+  color: var(--teal-700);
+}
+
+.debug-panel__badge--warn {
+  background: rgba(240, 80, 63, 0.12);
+  color: var(--coral-600);
+}
+
+.debug-panel__badge--error {
+  background: rgba(240, 80, 63, 0.22);
+  color: var(--coral-600);
+}
+
+.debug-panel__refresh {
+  align-self: flex-start;
+  font-size: 0.78rem;
+  color: var(--teal-600);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.debug-panel__refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.debug-panel__error {
+  font-size: 0.78rem;
+  color: var(--coral-600);
+}

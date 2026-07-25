@@ -27,6 +27,7 @@ Reads LIVEKIT_API_KEY / LIVEKIT_API_SECRET / LIVEKIT_URL from Vercel project
 environment variables (set in the Vercel dashboard — .env is not deployed).
 """
 
+import json
 import os
 import re
 import uuid
@@ -36,7 +37,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from livekit import api
 
+import provider_status
+
 CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+STT_PROVIDERS = {"azure", "chirp"}
+TTS_PROVIDERS = {"azure", "gemini"}
 
 app = FastAPI()
 
@@ -202,7 +207,11 @@ def index():
 
 
 @app.get("/api/livekit_token")
-def get_token(client_id: str | None = Query(default=None)):
+def get_token(
+    client_id: str | None = Query(default=None),
+    stt_provider: str | None = Query(default=None),
+    tts_provider: str | None = Query(default=None),
+):
     # client_id is a fresh id the frontend generates on every connect() call
     # (see useVoiceAgent.js) -- used to derive both the identity and the
     # per-caller room name below. Falls back to a random one if the frontend
@@ -216,11 +225,24 @@ def get_token(client_id: str | None = Query(default=None)):
     identity = f"patient-{suffix}"
     room_name = f"{ROOM_PREFIX}-{suffix}"
 
+    # stt_provider/tts_provider come from the frontend's hidden debug panel
+    # (see DebugPanel.jsx) -- passed through as participant metadata so
+    # agent.py's entrypoint() can pick providers per call instead of only
+    # via the STT_PROVIDER/TTS_PROVIDER env vars. Silently ignored (not
+    # included in metadata) if outside the known set, so agent.py falls
+    # back to its env var default rather than erroring on a bad value.
+    metadata = {}
+    if stt_provider in STT_PROVIDERS:
+        metadata["stt_provider"] = stt_provider
+    if tts_provider in TTS_PROVIDERS:
+        metadata["tts_provider"] = tts_provider
+
     access_token = (
         api.AccessToken(os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"])
         .with_identity(identity)
         .with_name(identity)
         .with_grants(api.VideoGrants(room_join=True, room=room_name))
+        .with_metadata(json.dumps(metadata))
     )
 
     return {
@@ -228,4 +250,15 @@ def get_token(client_id: str | None = Query(default=None)):
         "url": os.environ["LIVEKIT_URL"],
         "room": room_name,
         "identity": identity,
+    }
+
+
+@app.get("/api/provider_status")
+def get_provider_status():
+    """Live (best-effort, cached) health check for every STT/TTS provider
+    the debug panel can select -- see provider_status.py for exactly what
+    each check does and why it's cached the way it is."""
+    return {
+        "stt": {p: provider_status.check("stt", p) for p in sorted(STT_PROVIDERS)},
+        "tts": {p: provider_status.check("tts", p) for p in sorted(TTS_PROVIDERS)},
     }

@@ -1,8 +1,10 @@
+import { useState } from "react";
 import "./App.css";
 import { Header } from "./components/Header";
 import { CallButton } from "./components/CallButton";
 import { StatusPill } from "./components/StatusPill";
 import { Transcript } from "./components/Transcript";
+import { DebugPanel } from "./components/DebugPanel";
 import { CallStatus, useVoiceAgent } from "./hooks/useVoiceAgent";
 
 function App() {
@@ -16,6 +18,10 @@ function App() {
     disconnect,
     unlockAudio,
   } = useVoiceAgent();
+
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [sttProvider, setSttProvider] = useState("azure");
+  const [ttsProvider, setTtsProvider] = useState("gemini");
 
   const isIdle = status === CallStatus.IDLE || status === CallStatus.ERROR;
 
@@ -32,7 +38,11 @@ function App() {
         </p>
 
         <div className="call-panel">
-          <CallButton status={status} onConnect={connect} onDisconnect={disconnect} />
+          <CallButton
+            status={status}
+            onConnect={() => connect({ sttProvider, ttsProvider })}
+            onDisconnect={disconnect}
+          />
           <StatusPill status={status} activeSpeaker={activeSpeaker} errorMessage={errorMessage} />
           {isIdle && <p className="call-panel__hint">ඇමතුම ආරම්භ කිරීමට ඉහත බොත්තම ඔබන්න</p>}
           {needsAudioUnlock && (
@@ -42,11 +52,29 @@ function App() {
           )}
         </div>
 
+        {showDebugPanel && (
+          <DebugPanel
+            sttProvider={sttProvider}
+            onSttProviderChange={setSttProvider}
+            ttsProvider={ttsProvider}
+            onTtsProviderChange={setTtsProvider}
+            disabled={!isIdle}
+          />
+        )}
+
         <Transcript messages={transcript} />
       </main>
 
       <footer className="footer">
         <p>King&rsquo;s Hospital Colombo — නියැදි යාවත්කාලීන කිරීම (Sample Demo)</p>
+        <button
+          type="button"
+          className="footer__debug-toggle"
+          onClick={() => setShowDebugPanel((v) => !v)}
+          aria-label="Toggle provider debug panel"
+        >
+          •
+        </button>
       </footer>
     </div>
   );

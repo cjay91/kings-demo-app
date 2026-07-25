@@ -14,16 +14,30 @@ This replaced two earlier attempts:
    tool_response_scheduling is WHEN_IDLE, and a live duplex session never
    seems to reach "idle").
 
-Current setup, confirmed via live TTS->STT roundtrip testing with real
+Provider selection (both STT and TTS) can be set two ways:
+1. Per-call, from the frontend's hidden debug panel -- sent as
+   participant metadata ({"stt_provider": ..., "tts_provider": ...}) on
+   the token request (see api/index.py's /api/livekit_token), read back
+   out in entrypoint() below via ctx.wait_for_participant(). Lets a
+   tester compare providers call-to-call without redeploying or
+   touching secrets.
+2. STT_PROVIDER / TTS_PROVIDER env vars -- the fallback default when no
+   metadata is sent (e.g. token_server.py's local-dev client, which
+   doesn't have the debug panel).
+
+Current defaults, confirmed via live TTS->STT roundtrip testing with real
 credentials:
 - STT: Azure Speech (si-LK) by default -- accepts the language and
   transcribes real audio, though not perfectly (a synthetic-audio
   roundtrip test produced 2 word-level misses out of ~7 words, including
   one semantic miss -- worth judging against real speech, not just this
-  one data point). Set STT_PROVIDER=chirp (or "google") to switch to
-  Google Cloud Speech-to-Text's chirp_2 model instead, for side-by-side
-  comparison -- confirmed working via live testing, same si-LK caveats
-  apply. Needs GOOGLE_SERVICE_ACCOUNT_JSON (see below); Azure doesn't.
+  one data point). "chirp" (or "google") switches to Google Cloud
+  Speech-to-Text's chirp_2 model instead -- confirmed working via live
+  testing, same si-LK caveats apply, and a head-to-head comparison on the
+  same synthetic audio found Chirp dropped a specific detail (an
+  appointment time) that Azure preserved, though both got other words
+  wrong -- call it a mild edge for Azure, not a clean win. Needs
+  GOOGLE_SERVICE_ACCOUNT_JSON (see below); Azure doesn't.
 - LLM: Gemini 2.5 Flash as a plain text model -- no realtime/audio
   involved here, just normal chat completion + tool-calling.
 - TTS: GeminiTTS (livekit.plugins.google.beta), wrapped in a
@@ -182,13 +196,12 @@ class HospitalAgent(Agent):
         super().__init__(instructions=SYSTEM_PROMPT, tools=HOSPITAL_TOOLS)
 
 
-def build_stt():
-    """STT_PROVIDER=chirp (or "google") switches to Google Cloud
-    Speech-to-Text's chirp_2 model; anything else (including unset)
-    defaults to Azure. location="us-central1" is required -- chirp
-    models aren't available in "global", and chirp_3 (tried first,
-    before chirp_2) explicitly rejects si-LK as unsupported."""
-    provider = os.environ.get("STT_PROVIDER", "azure").lower()
+def build_stt(provider: str):
+    """provider="chirp" (or "google") switches to Google Cloud
+    Speech-to-Text's chirp_2 model; anything else defaults to Azure.
+    location="us-central1" is required -- chirp models aren't available
+    in "global", and chirp_3 (tried first, before chirp_2) explicitly
+    rejects si-LK as unsupported."""
     if provider in ("chirp", "google"):
         return google.STT(
             languages="si-LK",
@@ -204,6 +217,36 @@ def build_stt():
     )
 
 
+def build_tts(provider: str):
+    """provider="azure" switches to Azure's si-LK-ThiliniNeural voice
+    (fast, reliable, weaker Sinhala voice quality per live testing);
+    anything else defaults to the Gemini TTS cascade (better voice
+    quality, but subject to the preview models' quota/latency issues --
+    see TimeoutBoundGeminiTTS above)."""
+    if provider == "azure":
+        return azure.TTS(
+            voice="si-LK-ThiliniNeural",
+            language="si-LK",
+            speech_key=os.environ["AZURE_API_KEY"],
+            speech_region=os.environ["AZURE_REGION"],
+        )
+    return FallbackAdapter(
+        [
+            TimeoutBoundGeminiTTS(
+                model="gemini-3.1-flash-tts-preview",
+                voice_name="Kore",
+                api_key=os.environ["GOOGLE_API_KEY"],
+            ),
+            TimeoutBoundGeminiTTS(
+                model="gemini-2.5-flash-preview-tts",
+                voice_name="Kore",
+                api_key=os.environ["GOOGLE_API_KEY"],
+            ),
+        ],
+        max_retry_per_tts=0,
+    )
+
+
 async def entrypoint(ctx: JobContext) -> None:
     # Re-seed every job rather than relying on hospital.db already being
     # present in the deployed container -- it's git-ignored, and whether a
@@ -216,28 +259,30 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await ctx.connect()
 
+    # Per-call provider selection: the frontend's hidden debug panel sends
+    # stt_provider/tts_provider as participant metadata (see
+    # api/index.py's /api/livekit_token) rather than baking a single
+    # choice into a fixed env var -- lets a tester switch providers
+    # per-call from the browser instead of redeploying/updating secrets
+    # every time (which is what STT_PROVIDER/TTS_PROVIDER env vars still
+    # control as the fallback default, e.g. for the token_server.py local
+    # dev client that doesn't send this).
+    participant = await ctx.wait_for_participant()
+    try:
+        metadata = json.loads(participant.metadata) if participant.metadata else {}
+    except json.JSONDecodeError:
+        metadata = {}
+    stt_provider = metadata.get("stt_provider") or os.environ.get("STT_PROVIDER", "azure")
+    tts_provider = metadata.get("tts_provider") or os.environ.get("TTS_PROVIDER", "gemini")
+
     session = AgentSession(
-        stt=build_stt(),
+        stt=build_stt(stt_provider.lower()),
         llm=google.LLM(
             model="gemini-2.5-flash",
             api_key=os.environ["GOOGLE_API_KEY"],
             temperature=0.2,
         ),
-        tts=FallbackAdapter(
-            [
-                TimeoutBoundGeminiTTS(
-                    model="gemini-3.1-flash-tts-preview",
-                    voice_name="Kore",
-                    api_key=os.environ["GOOGLE_API_KEY"],
-                ),
-                TimeoutBoundGeminiTTS(
-                    model="gemini-2.5-flash-preview-tts",
-                    voice_name="Kore",
-                    api_key=os.environ["GOOGLE_API_KEY"],
-                ),
-            ],
-            max_retry_per_tts=0,
-        ),
+        tts=build_tts(tts_provider.lower()),
     )
 
     await session.start(agent=HospitalAgent(), room=ctx.room)

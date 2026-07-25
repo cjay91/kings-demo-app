@@ -39,7 +39,7 @@ export function useVoiceAgent() {
   const audioElRef = useRef(null);
   const pageHideHandlerRef = useRef(null);
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async ({ sttProvider, ttsProvider } = {}) => {
     setStatus(CallStatus.CONNECTING);
     setErrorMessage(null);
     setTranscript([]);
@@ -48,6 +48,11 @@ export function useVoiceAgent() {
     try {
       const tokenUrl = new URL(TOKEN_ENDPOINT, window.location.origin);
       tokenUrl.searchParams.set("client_id", getClientId());
+      // Optional per-call provider override from the hidden debug panel
+      // (see DebugPanel.jsx) -- omitted entirely when not set, so the
+      // server falls back to its own env var default.
+      if (sttProvider) tokenUrl.searchParams.set("stt_provider", sttProvider);
+      if (ttsProvider) tokenUrl.searchParams.set("tts_provider", ttsProvider);
       const res = await fetch(tokenUrl);
       if (!res.ok) throw new Error(`Token request failed (${res.status})`);
       const { token, url } = await res.json();
