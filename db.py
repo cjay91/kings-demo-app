@@ -114,13 +114,26 @@ def search_doctors_by_specialty(specialty: str) -> list[dict]:
     ("විරුද්ධ රෝග" heard for "හෘද රෝග"), which fuzzy-matched other, wrong
     specialties just as confidently as the correct one. Safer to return
     nothing (see get_all_specialties for the fallback) than to silently
-    guess wrong."""
+    guess wrong.
+
+    Checks containment in BOTH directions, not just "DB value contains the
+    query": a caller asking for "හෘද රෝග විශේෂඥ" (cardiology *specialist*)
+    was falling through to "no match" and getting offered the full
+    specialty list instead of just being understood, because the query is
+    LONGER than the stored specialty ("හෘද රෝග" alone) -- the query
+    contains the specialty, not the other way around. Still an exact
+    substring check either way, so the fuzzy-matching risk above doesn't
+    apply here."""
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM doctors WHERE specialty LIKE ? OR specialty_si LIKE ?",
-            (f"%{specialty}%", f"%{specialty}%"),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        all_doctors = [dict(r) for r in conn.execute("SELECT * FROM doctors").fetchall()]
+    return [
+        d
+        for d in all_doctors
+        if specialty in d["specialty"]
+        or specialty in d["specialty_si"]
+        or d["specialty"] in specialty
+        or d["specialty_si"] in specialty
+    ]
 
 
 def get_all_specialties() -> list[dict]:
