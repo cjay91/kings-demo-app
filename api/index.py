@@ -41,7 +41,7 @@ import provider_status
 
 CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 STT_PROVIDERS = {"azure", "chirp"}
-TTS_PROVIDERS = {"azure", "gemini"}
+TTS_PROVIDERS = {"azure", "gemini", "elevenlabs"}
 
 app = FastAPI()
 

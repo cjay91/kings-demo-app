@@ -235,8 +235,9 @@ API cross-origin.
    - `GOOGLE_API_KEY`
    - `GOOGLE_SERVICE_ACCOUNT_JSON` (same single-line compacted JSON used
      for the agent worker's secret, see Part 2)
+   - `ELEVENLABS_API_KEY`
 
-   The last four are new: `/api/provider_status` (used by the frontend's
+   The last five are new: `/api/provider_status` (used by the frontend's
    hidden debug panel, see "Provider debug panel" below) runs *on this
    Vercel function*, not the agent worker, so it needs its own copy of
    the same STT/TTS credentials to check them live. It only ever returns
@@ -253,7 +254,7 @@ API cross-origin.
    calling `/api/livekit_token` on the same origin.
 
 If you'd rather deploy from the CLI: `npx vercel` from the repo root, then
-`npx vercel env add LIVEKIT_API_KEY` (repeat for the other six) and
+`npx vercel env add LIVEKIT_API_KEY` (repeat for the other seven) and
 `npx vercel --prod`.
 
 ### Part 2 — Agent worker on LiveKit Cloud Agents
@@ -394,25 +395,35 @@ by default (a real caller should never see it) — click the small, low-
 contrast **•** dot at the very bottom of the page (below the footer text)
 to reveal it.
 
-- **STT**: Azure or Google Chirp. **TTS**: Gemini or Azure. Selection is
-  read once at connect time (sent as LiveKit participant metadata, see
-  `/api/livekit_token` and `agent.py`'s `entrypoint()`) — switching mid-call
-  does nothing, hence the picker being disabled while a call is active.
+- **STT**: Azure or Google Chirp. **TTS**: Gemini, Azure, or ElevenLabs.
+  Selection is read once at connect time (sent as LiveKit participant
+  metadata, see `/api/livekit_token` and `agent.py`'s `entrypoint()`) —
+  switching mid-call does nothing, hence the picker being disabled while a
+  call is active.
 - Each option shows a live status badge (ready / quota exceeded / error)
   from `/api/provider_status`, which actually calls out to each provider
   (Azure's voices list, a Google auth refresh, a minimal Gemini
-  generateContent request) rather than just checking that a key is
-  present. Built after Gemini's TTS quota got silently exhausted more than
-  once during testing with the only symptom being total silence on a real
-  call — this panel is meant to catch that *before* you burn a test
-  attempt on it.
+  generateContent request, a minimal ElevenLabs synthesis request) rather
+  than just checking that a key is present. Built after Gemini's TTS quota
+  got silently exhausted more than once during testing with the only
+  symptom being total silence on a real call — this panel is meant to
+  catch that *before* you burn a test attempt on it.
 - Checking Gemini's quota costs one real request against its own
   100/day cap, so that specific check is cached hard (5 minutes when
   healthy; once exhausted, cached for exactly as long as Google's own
-  error says to wait). The other three checks are cheap/free and cached
-  briefly just to avoid hammering them. Caching is in-memory on the
-  Vercel function, so it resets on a cold start — a demo-appropriate
-  tradeoff, not a guarantee.
+  error says to wait). The other checks are cheap/free (or, for
+  ElevenLabs, billed against a monthly character quota rather than a
+  punishing daily cap) and cached briefly just to avoid hammering them.
+  Caching is in-memory on the Vercel function, so it resets on a cold
+  start — a demo-appropriate tradeoff, not a guarantee.
+- **ElevenLabs is deliberately included despite testing badly** —
+  its TTS API rejects an explicit `si` language code on every model, and
+  a live roundtrip test (synthesize → feed back through Azure STT) found
+  it substituting literal English words phonetically written in Sinhala
+  script for words it couldn't handle (e.g. "හෘද රෝග" / cardiology came
+  out as "හාඩ් රොක්" / "hard rock"). Kept as an option specifically so it
+  can be heard and compared directly rather than taken on faith — the
+  dropdown label says as much.
 - No live comparison substitutes for testing with real speech — the one
   head-to-head test done so far (see `agent.py`'s STT section) used
   synthetic audio from Azure's own TTS, which can plausibly favor Azure.

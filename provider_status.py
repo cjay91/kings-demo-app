@@ -152,11 +152,38 @@ def check_gemini_tts() -> dict:
     return _cached("gemini_tts", 300, compute)
 
 
+def check_elevenlabs_tts() -> dict:
+    def compute():
+        key = os.environ.get("ELEVENLABS_API_KEY")
+        if not key:
+            return {"status": "not_configured"}
+        body = json.dumps({"text": "hi", "model_id": "eleven_multilingual_v2"}).encode()
+        req = urllib.request.Request(
+            "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM",
+            data=body,
+            headers={"xi-api-key": key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15):
+                return {"status": "ok"}
+        except urllib.error.HTTPError as e:
+            return {"status": "error", "detail": f"HTTP {e.code}"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+
+    # No punishing daily cap like Gemini's -- ElevenLabs bills against a
+    # monthly character quota, so a short cache is just to avoid being
+    # wasteful, not to protect against exhausting a small fixed budget.
+    return _cached("elevenlabs_tts", 60, compute)
+
+
 _CHECKS = {
     ("stt", "azure"): check_azure_stt,
     ("stt", "chirp"): check_chirp_stt,
     ("tts", "azure"): check_azure_tts,
     ("tts", "gemini"): check_gemini_tts,
+    ("tts", "elevenlabs"): check_elevenlabs_tts,
 }
 
 

@@ -103,7 +103,7 @@ from livekit.agents import (
     cli,
 )
 from livekit.agents.tts import FallbackAdapter
-from livekit.plugins import azure, google
+from livekit.plugins import azure, elevenlabs, google
 from livekit.plugins.google.beta import GeminiTTS
 from livekit.plugins.google.beta.gemini_tts import ChunkedStream as _GeminiChunkedStream
 
@@ -220,15 +220,30 @@ def build_stt(provider: str):
 def build_tts(provider: str):
     """provider="azure" switches to Azure's si-LK-ThiliniNeural voice
     (fast, reliable, weaker Sinhala voice quality per live testing);
-    anything else defaults to the Gemini TTS cascade (better voice
-    quality, but subject to the preview models' quota/latency issues --
-    see TimeoutBoundGeminiTTS above)."""
+    provider="elevenlabs" -- added as a comparison option for the debug
+    panel despite testing badly: ElevenLabs' TTS API rejects an explicit
+    si language code on every model (400 unsupported_language), and even
+    left to auto-detect, a live roundtrip test (synthesize -> feed back
+    through Azure STT) showed it substituting literal English words
+    phonetically written in Sinhala script for words it apparently
+    couldn't handle -- e.g. "හෘද රෝග" (cardiology) came out as "හාඩ් රොක්"
+    ("hard rock"), "සමඟ" (with) as "ස්මිත්" ("Smith"). Kept in as an
+    intentionally-bad option so it can be heard/compared directly rather
+    than taken on faith; anything else (including unset) defaults to the
+    Gemini TTS cascade (better voice quality, but subject to the preview
+    models' quota/latency issues -- see TimeoutBoundGeminiTTS above)."""
     if provider == "azure":
         return azure.TTS(
             voice="si-LK-ThiliniNeural",
             language="si-LK",
             speech_key=os.environ["AZURE_API_KEY"],
             speech_region=os.environ["AZURE_REGION"],
+        )
+    if provider == "elevenlabs":
+        return elevenlabs.TTS(
+            voice_id="21m00Tcm4TlvDq8ikWAM",  # "Rachel" -- ElevenLabs' default multilingual voice
+            model="eleven_multilingual_v2",
+            api_key=os.environ["ELEVENLABS_API_KEY"],
         )
     return FallbackAdapter(
         [

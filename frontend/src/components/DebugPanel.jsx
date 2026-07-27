@@ -9,6 +9,7 @@ const STT_OPTIONS = [
 const TTS_OPTIONS = [
   { value: "gemini", label: "Gemini" },
   { value: "azure", label: "Azure" },
+  { value: "elevenlabs", label: "ElevenLabs (known bad for Sinhala)" },
 ];
 
 const STATUS_META = {
