@@ -46,7 +46,12 @@ async def search_consultants(context: RunContext, query: str) -> str:
     falls back to a name search.
 
     Args:
-        query: The doctor's name or the specialty to search for.
+        query: The doctor's name, OR just the bare specialty/condition term
+            -- e.g. "cardiology" or "හෘද රෝග", NOT "cardiology specialist" or
+            "හෘද රෝග විශේෂඥ". Strip descriptor words like
+            specialist/doctor/විශේෂඥ/වෛද්‍ය/ඩොක්ටර් before passing this in;
+            they aren't part of the specialty name in the database and will
+            cause a real match to be missed.
     """
     results = db.search_doctors_by_specialty(query)
     is_fuzzy = False
