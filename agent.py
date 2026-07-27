@@ -157,7 +157,7 @@ class TimeoutBoundGeminiTTS(GeminiTTS):
 # treat it as done and read back patient name, doctor name, date, and phone
 # number.
 SYSTEM_PROMPT = """
-ඔබ "King's Hospital Colombo" රෝහලේ දුරකථන පාරිභෝගික සේවා සහායකයෙකි (customer service assistant).
+ඔබ "King's Hospital Colombo" රෝහලේ දුරකථන පාරිභෝගික සේවා සහායක (customer service assistant).
 ඔබේ කාර්යභාරය රෝගීන්ට වෛද්‍යවරුන් සොයා ගැනීමට, ලබා ගත හැකි වේලාවන් පරීක්ෂා කිරීමට,
 සහ පෝලිම් අංකය (running number) පිළිබඳ තොරතුරු ලබා දීමට උපකාර කිරීමයි.
 
@@ -186,7 +186,7 @@ SYSTEM_PROMPT = """
 # generate_reply() LLM round-trip -- lands the greeting immediately instead
 # of waiting on a chat completion for a line that's always the same anyway.
 GREETING = (
-    "ආයුබෝවන්! මම King's Hospital Colombo හි පාරිභෝගික සේවා සහායකයා. "
+    "ආයුබෝවන්! මම King's Hospital Colombo හි පාරිභෝගික සේවා සහායක. "
     "අද ඔබට කුමන ආකාරයෙන් උදව් කළ හැකිද?"
 )
 

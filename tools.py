@@ -27,12 +27,12 @@ def _relative_date(text: str) -> str:
 
 def _format_time_si(hhmm: str) -> str:
     """Format a 24-hour "HH:MM" string as 12-hour Sinhala time, e.g. "15:00"
-    -> "3:00 ප.ව". Done here rather than left to the LLM since correctly
-    converting 24-hour time into Sinhala පෙ.ව/ප.ව notation on the fly is
+    -> "3:00 සවස". Done here rather than left to the LLM since correctly
+    converting 24-hour time into Sinhala උදෑසන/සවස wording on the fly is
     exactly the kind of small formatting detail an LLM can get inconsistent
     about -- pushing it into the tool output makes it always correct."""
     hour, minute = map(int, hhmm.split(":"))
-    period = "පෙ.ව" if hour < 12 else "ප.ව"
+    period = "උදෑසන" if hour < 12 else "සවස"
     hour12 = hour % 12 or 12
     return f"{hour12}:{minute:02d} {period}"
 
