@@ -30,11 +30,9 @@ function App() {
       <Header />
 
       <main className="hero">
-        <p className="hero__eyebrow">සිංහල හඬ සහායක</p>
-        <h1 className="hero__title">අද ඔබට කුමන ආකාරයෙන් උදව් කළ හැකිද?</h1>
+        <p className="hero__eyebrow">සිංහල Voice Agent</p>
         <p className="hero__subtitle">
-          වෛද්‍යවරයෙකු සොයන්න, ලබා ගත හැකි වේලාවන් බලන්න, හෝ පෝලිම් අංකය විමසන්න —
-          දුරකථනයෙන් කතා කරන ආකාරයටම, සිංහලෙන්.
+          වෛද්‍යවරයෙකු සොයන්න, ලබා ගත හැකි වේලාවන් බලන්න, හෝ පෝලිම් අංකය විමසන්න
         </p>
 
         <div className="call-panel">
@@ -52,15 +50,15 @@ function App() {
           )}
         </div>
 
-        {showDebugPanel && (
-          <DebugPanel
-            sttProvider={sttProvider}
-            onSttProviderChange={setSttProvider}
-            ttsProvider={ttsProvider}
-            onTtsProviderChange={setTtsProvider}
-            disabled={!isIdle}
-          />
-        )}
+        <DebugPanel
+          isOpen={showDebugPanel}
+          onClose={() => setShowDebugPanel(false)}
+          sttProvider={sttProvider}
+          onSttProviderChange={setSttProvider}
+          ttsProvider={ttsProvider}
+          onTtsProviderChange={setTtsProvider}
+          disabled={!isIdle}
+        />
 
         <Transcript messages={transcript} />
       </main>

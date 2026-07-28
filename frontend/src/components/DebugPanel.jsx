@@ -39,14 +39,24 @@ function StatusBadge({ entry }) {
 }
 
 /**
- * Hidden (toggle-only) panel letting a tester pick STT/TTS provider per call
- * and see a live health check for each, rather than only via STT_PROVIDER/
- * TTS_PROVIDER env vars + a redeploy. Selection only takes effect at the
- * next connect() -- disabled while a call is active since switching
- * mid-call isn't wired up (matches the per-call, not per-turn, granularity
- * agent.py reads this at).
+ * Hidden (toggle-only) sidebar letting a tester pick STT/TTS provider per
+ * call and see a live health check for each, rather than only via
+ * STT_PROVIDER/TTS_PROVIDER env vars + a redeploy. Selection only takes
+ * effect at the next connect() -- disabled while a call is active since
+ * switching mid-call isn't wired up (matches the per-call, not per-turn,
+ * granularity agent.py reads this at). Always mounted (not conditionally
+ * rendered) so the slide transition has something to animate and the
+ * fetched status survives being closed and reopened.
  */
-export function DebugPanel({ sttProvider, onSttProviderChange, ttsProvider, onTtsProviderChange, disabled }) {
+export function DebugPanel({
+  isOpen,
+  onClose,
+  sttProvider,
+  onSttProviderChange,
+  ttsProvider,
+  onTtsProviderChange,
+  disabled,
+}) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -70,45 +80,61 @@ export function DebugPanel({ sttProvider, onSttProviderChange, ttsProvider, onTt
   }, []);
 
   return (
-    <div className="debug-panel">
-      <div className="debug-panel__row">
-        <label htmlFor="stt-provider">STT</label>
-        <select
-          id="stt-provider"
-          value={sttProvider}
-          disabled={disabled}
-          onChange={(e) => onSttProviderChange(e.target.value)}
-        >
-          {STT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <StatusBadge entry={status?.stt?.[sttProvider]} />
-      </div>
+    <>
+      <div
+        className={`debug-sidebar__backdrop ${isOpen ? "debug-sidebar__backdrop--open" : ""}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <aside className={`debug-sidebar ${isOpen ? "debug-sidebar--open" : ""}`}>
+        <div className="debug-sidebar__header">
+          <span>Provider settings</span>
+          <button type="button" className="debug-sidebar__close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </div>
 
-      <div className="debug-panel__row">
-        <label htmlFor="tts-provider">TTS</label>
-        <select
-          id="tts-provider"
-          value={ttsProvider}
-          disabled={disabled}
-          onChange={(e) => onTtsProviderChange(e.target.value)}
-        >
-          {TTS_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <StatusBadge entry={status?.tts?.[ttsProvider]} />
-      </div>
+        <div className="debug-panel">
+          <div className="debug-panel__row">
+            <label htmlFor="stt-provider">STT</label>
+            <select
+              id="stt-provider"
+              value={sttProvider}
+              disabled={disabled}
+              onChange={(e) => onSttProviderChange(e.target.value)}
+            >
+              {STT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <StatusBadge entry={status?.stt?.[sttProvider]} />
+          </div>
 
-      <button type="button" className="debug-panel__refresh" onClick={checkStatus} disabled={loading}>
-        {loading ? "checking..." : "recheck status"}
-      </button>
-      {error && <p className="debug-panel__error">{error}</p>}
-    </div>
+          <div className="debug-panel__row">
+            <label htmlFor="tts-provider">TTS</label>
+            <select
+              id="tts-provider"
+              value={ttsProvider}
+              disabled={disabled}
+              onChange={(e) => onTtsProviderChange(e.target.value)}
+            >
+              {TTS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <StatusBadge entry={status?.tts?.[ttsProvider]} />
+          </div>
+
+          <button type="button" className="debug-panel__refresh" onClick={checkStatus} disabled={loading}>
+            {loading ? "checking..." : "recheck status"}
+          </button>
+          {error && <p className="debug-panel__error">{error}</p>}
+        </div>
+      </aside>
+    </>
   );
 }

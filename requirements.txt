@@ -3,3 +3,4 @@ uvicorn==0.51.0
 livekit-api==1.2.0
 python-dotenv==1.2.2
 google-auth==2.56.0
+requests==2.34.2

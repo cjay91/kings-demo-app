@@ -6,3 +6,6 @@ gcp-service-account.json
 hospital.db
 hospital_export.json
 livekit.toml
+
+.vercel
+.env*
