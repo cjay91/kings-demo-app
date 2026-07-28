@@ -50,6 +50,7 @@ function StatusBadge({ entry }) {
  */
 export function DebugPanel({
   isOpen,
+  onToggle,
   onClose,
   sttProvider,
   onSttProviderChange,
@@ -86,6 +87,14 @@ export function DebugPanel({
         onClick={onClose}
         aria-hidden="true"
       />
+      <button
+        type="button"
+        className={`debug-sidebar__tab ${isOpen ? "debug-sidebar__tab--open" : ""}`}
+        onClick={onToggle}
+        aria-label="Toggle provider settings"
+      >
+        ⚙
+      </button>
       <aside className={`debug-sidebar ${isOpen ? "debug-sidebar--open" : ""}`}>
         <div className="debug-sidebar__header">
           <span>Provider settings</span>

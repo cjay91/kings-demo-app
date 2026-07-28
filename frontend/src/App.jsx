@@ -52,6 +52,7 @@ function App() {
 
         <DebugPanel
           isOpen={showDebugPanel}
+          onToggle={() => setShowDebugPanel((v) => !v)}
           onClose={() => setShowDebugPanel(false)}
           sttProvider={sttProvider}
           onSttProviderChange={setSttProvider}
@@ -64,15 +65,7 @@ function App() {
       </main>
 
       <footer className="footer">
-        <p>King&rsquo;s Hospital Colombo — නියැදි යාවත්කාලීන කිරීම (Sample Demo)</p>
-        <button
-          type="button"
-          className="footer__debug-toggle"
-          onClick={() => setShowDebugPanel((v) => !v)}
-          aria-label="Toggle provider debug panel"
-        >
-          •
-        </button>
+        <p>King&rsquo;s Hospital Colombo — Sample Demo</p>
       </footer>
     </div>
   );

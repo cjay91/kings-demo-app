@@ -347,26 +347,7 @@
   opacity: 0.8;
 }
 
-/* Deliberately subtle -- a hidden debug toggle, not a normal UI control.
-   No visible border/background; only a faint dot a tester would know to
-   look for, not something a real caller would ever notice or click. */
-.footer__debug-toggle {
-  margin-top: 4px;
-  border: none;
-  background: none;
-  color: var(--ink-soft);
-  opacity: 0.25;
-  font-size: 0.9rem;
-  line-height: 1;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-
-.footer__debug-toggle:hover {
-  opacity: 0.6;
-}
-
-/* ---------- Debug sidebar (hidden, toggled from the footer dot) ---------- */
+/* ---------- Debug sidebar (hidden, toggled from its own edge tab) ---------- */
 
 .debug-sidebar__backdrop {
   position: fixed;
@@ -402,6 +383,38 @@
 
 .debug-sidebar--open {
   transform: translateX(0);
+}
+
+/* Deliberately subtle -- a hidden debug toggle, not a normal UI control.
+   Low-contrast pill attached to the viewport edge; slides along with the
+   sidebar so it stays right next to it whether open or closed, rather
+   than living somewhere unrelated like the footer. */
+.debug-sidebar__tab {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 42;
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  opacity: 0.35;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 10px 8px;
+  cursor: pointer;
+  transition: right 0.25s ease, opacity 0.2s ease;
+}
+
+.debug-sidebar__tab:hover {
+  opacity: 0.8;
+}
+
+.debug-sidebar__tab--open {
+  right: min(320px, 85vw);
+  opacity: 0.8;
 }
 
 .debug-sidebar__header {
@@ -450,6 +463,7 @@
 
 .debug-panel__row select {
   flex: 1;
+  min-width: 0;
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -459,6 +473,7 @@
 }
 
 .debug-panel__badge {
+  flex-shrink: 0;
   font-size: 0.72rem;
   padding: 2px 8px;
   border-radius: 999px;
