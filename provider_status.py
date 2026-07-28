@@ -211,6 +211,41 @@ def check_gemini_tts() -> dict:
     return _cached("gemini_tts", 30, compute)
 
 
+def check_gemini_llm() -> dict:
+    def compute():
+        key = os.environ.get("GOOGLE_API_KEY")
+        if not key:
+            return {"status": "not_configured"}
+        body = json.dumps({"contents": [{"parts": [{"text": "hi"}]}]}).encode()
+        req = urllib.request.Request(
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-2.5-flash:generateContent?key={key}",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return {"status": "error", "detail": f"HTTP {e.code}"}
+        except Exception as e:
+            return {"status": "timeout" if _is_timeout(e) else "error", "detail": str(e)}
+        has_text = any(
+            part.get("text")
+            for cand in data.get("candidates", [])
+            for part in cand.get("content", {}).get("parts", [])
+        )
+        if not has_text:
+            return {"status": "error", "detail": "200 OK but no text returned"}
+        return {"status": "ok"}
+
+    # gemini-2.5-flash is a GA model (not a quota-capped preview like the TTS
+    # models above), so this doesn't need the same aggressive/quota-aware
+    # caching -- a plain short cache like Azure/ElevenLabs is enough.
+    return _cached("gemini_llm", 60, compute)
+
+
 def check_elevenlabs_tts() -> dict:
     def compute():
         key = os.environ.get("ELEVENLABS_API_KEY")
@@ -246,6 +281,7 @@ _CHECKS = {
     ("tts", "azure"): check_azure_tts,
     ("tts", "gemini"): check_gemini_tts,
     ("tts", "elevenlabs"): check_elevenlabs_tts,
+    ("llm", "gemini"): check_gemini_llm,
 }
 
 

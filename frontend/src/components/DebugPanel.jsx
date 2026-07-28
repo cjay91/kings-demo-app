@@ -11,6 +11,10 @@ const TTS_OPTIONS = [
   { value: "azure", label: "Azure" },
   { value: "elevenlabs", label: "ElevenLabs" },
 ];
+// Only one real option right now -- agent.py has no multi-provider LLM
+// support, so this row is shown for consistency/visibility but isn't
+// actually a live choice (see the disabled select below).
+const LLM_OPTIONS = [{ value: "gemini", label: "Gemini" }];
 
 const STATUS_META = {
   ok: { text: "ready", tone: "ok" },
@@ -40,19 +44,14 @@ function StatusBadge({ entry }) {
 }
 
 /**
- * Hidden (toggle-only) sidebar letting a tester pick STT/TTS provider per
- * call and see a live health check for each, rather than only via
- * STT_PROVIDER/TTS_PROVIDER env vars + a redeploy. Selection only takes
- * effect at the next connect() -- disabled while a call is active since
- * switching mid-call isn't wired up (matches the per-call, not per-turn,
- * granularity agent.py reads this at). Always mounted (not conditionally
- * rendered) so the slide transition has something to animate and the
- * fetched status survives being closed and reopened.
+ * Always-visible provider settings card, fixed in a page corner. Lets a
+ * tester pick STT/TTS provider per call and see a live health check for
+ * each, rather than only via STT_PROVIDER/TTS_PROVIDER env vars + a
+ * redeploy. Selection only takes effect at the next connect() -- disabled
+ * while a call is active since switching mid-call isn't wired up (matches
+ * the per-call, not per-turn, granularity agent.py reads this at).
  */
 export function DebugPanel({
-  isOpen,
-  onToggle,
-  onClose,
   sttProvider,
   onSttProviderChange,
   ttsProvider,
@@ -82,69 +81,59 @@ export function DebugPanel({
   }, []);
 
   return (
-    <>
-      <div
-        className={`debug-sidebar__backdrop ${isOpen ? "debug-sidebar__backdrop--open" : ""}`}
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <button
-        type="button"
-        className={`debug-sidebar__tab ${isOpen ? "debug-sidebar__tab--open" : ""}`}
-        onClick={onToggle}
-        aria-label="Toggle provider settings"
-      >
-        ⚙
+    <div className="debug-panel">
+      <div className="debug-panel__title">Provider settings</div>
+
+      <div className="debug-panel__row">
+        <label htmlFor="stt-provider">STT</label>
+        <select
+          id="stt-provider"
+          value={sttProvider}
+          disabled={disabled}
+          onChange={(e) => onSttProviderChange(e.target.value)}
+        >
+          {STT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <StatusBadge entry={status?.stt?.[sttProvider]} />
+      </div>
+
+      <div className="debug-panel__row">
+        <label htmlFor="tts-provider">TTS</label>
+        <select
+          id="tts-provider"
+          value={ttsProvider}
+          disabled={disabled}
+          onChange={(e) => onTtsProviderChange(e.target.value)}
+        >
+          {TTS_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <StatusBadge entry={status?.tts?.[ttsProvider]} />
+      </div>
+
+      <div className="debug-panel__row">
+        <label htmlFor="llm-provider">LLM</label>
+        <select id="llm-provider" value={LLM_OPTIONS[0].value} disabled>
+          {LLM_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <StatusBadge entry={status?.llm?.[LLM_OPTIONS[0].value]} />
+      </div>
+
+      <button type="button" className="debug-panel__refresh" onClick={checkStatus} disabled={loading}>
+        {loading ? "checking..." : "recheck status"}
       </button>
-      <aside className={`debug-sidebar ${isOpen ? "debug-sidebar--open" : ""}`}>
-        <div className="debug-sidebar__header">
-          <span>Provider settings</span>
-          <button type="button" className="debug-sidebar__close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
-
-        <div className="debug-panel">
-          <div className="debug-panel__row">
-            <label htmlFor="stt-provider">STT</label>
-            <select
-              id="stt-provider"
-              value={sttProvider}
-              disabled={disabled}
-              onChange={(e) => onSttProviderChange(e.target.value)}
-            >
-              {STT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <StatusBadge entry={status?.stt?.[sttProvider]} />
-          </div>
-
-          <div className="debug-panel__row">
-            <label htmlFor="tts-provider">TTS</label>
-            <select
-              id="tts-provider"
-              value={ttsProvider}
-              disabled={disabled}
-              onChange={(e) => onTtsProviderChange(e.target.value)}
-            >
-              {TTS_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-            <StatusBadge entry={status?.tts?.[ttsProvider]} />
-          </div>
-
-          <button type="button" className="debug-panel__refresh" onClick={checkStatus} disabled={loading}>
-            {loading ? "checking..." : "recheck status"}
-          </button>
-          {error && <p className="debug-panel__error">{error}</p>}
-        </div>
-      </aside>
-    </>
+      {error && <p className="debug-panel__error">{error}</p>}
+    </div>
   );
 }

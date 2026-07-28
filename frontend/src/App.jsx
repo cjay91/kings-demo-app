@@ -19,7 +19,6 @@ function App() {
     unlockAudio,
   } = useVoiceAgent();
 
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [sttProvider, setSttProvider] = useState("azure");
   const [ttsProvider, setTtsProvider] = useState("gemini");
 
@@ -51,9 +50,6 @@ function App() {
         </div>
 
         <DebugPanel
-          isOpen={showDebugPanel}
-          onToggle={() => setShowDebugPanel((v) => !v)}
-          onClose={() => setShowDebugPanel(false)}
           sttProvider={sttProvider}
           onSttProviderChange={setSttProvider}
           ttsProvider={ttsProvider}

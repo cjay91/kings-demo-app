@@ -347,105 +347,29 @@
   opacity: 0.8;
 }
 
-/* ---------- Debug sidebar (hidden, toggled from its own edge tab) ---------- */
-
-.debug-sidebar__backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
-  z-index: 40;
-}
-
-.debug-sidebar__backdrop--open {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.debug-sidebar {
-  position: fixed;
-  top: 0;
-  right: 0;
-  height: 100vh;
-  width: min(320px, 85vw);
-  background: var(--surface);
-  border-left: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  transform: translateX(100%);
-  transition: transform 0.25s ease;
-  z-index: 41;
-  display: flex;
-  flex-direction: column;
-  font-family: var(--font-latin);
-}
-
-.debug-sidebar--open {
-  transform: translateX(0);
-}
-
-/* Deliberately subtle -- a hidden debug toggle, not a normal UI control.
-   Low-contrast pill attached to the viewport edge; slides along with the
-   sidebar so it stays right next to it whether open or closed, rather
-   than living somewhere unrelated like the footer. */
-.debug-sidebar__tab {
-  position: fixed;
-  top: 50%;
-  right: 0;
-  transform: translateY(-50%);
-  z-index: 42;
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  background: var(--surface);
-  color: var(--ink-soft);
-  opacity: 0.35;
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 10px 8px;
-  cursor: pointer;
-  transition: right 0.25s ease, opacity 0.2s ease;
-}
-
-.debug-sidebar__tab:hover {
-  opacity: 0.8;
-}
-
-.debug-sidebar__tab--open {
-  right: min(320px, 85vw);
-  opacity: 0.8;
-}
-
-.debug-sidebar__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 18px;
-  border-bottom: 1px solid var(--border);
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.debug-sidebar__close {
-  border: none;
-  background: none;
-  color: var(--ink-soft);
-  font-size: 1.4rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 4px;
-}
-
-.debug-sidebar__close:hover {
-  color: var(--ink);
-}
+/* ---------- Debug panel (always visible, fixed to a page corner) ---------- */
 
 .debug-panel {
-  padding: 16px 18px;
+  position: fixed;
+  top: 88px;
+  right: 16px;
+  z-index: 40;
+  width: min(260px, 80vw);
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--font-latin);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
+}
+
+.debug-panel__title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--ink);
 }
 
 .debug-panel__row {

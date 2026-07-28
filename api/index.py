@@ -42,6 +42,7 @@ import provider_status
 CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 STT_PROVIDERS = {"azure", "chirp"}
 TTS_PROVIDERS = {"azure", "gemini", "elevenlabs"}
+LLM_PROVIDERS = {"gemini"}
 
 app = FastAPI()
 
@@ -255,10 +256,11 @@ def get_token(
 
 @app.get("/api/provider_status")
 def get_provider_status():
-    """Live (best-effort, cached) health check for every STT/TTS provider
-    the debug panel can select -- see provider_status.py for exactly what
-    each check does and why it's cached the way it is."""
+    """Live (best-effort, cached) health check for every STT/TTS/LLM
+    provider the debug panel shows -- see provider_status.py for exactly
+    what each check does and why it's cached the way it is."""
     return {
         "stt": {p: provider_status.check("stt", p) for p in sorted(STT_PROVIDERS)},
         "tts": {p: provider_status.check("tts", p) for p in sorted(TTS_PROVIDERS)},
+        "llm": {p: provider_status.check("llm", p) for p in sorted(LLM_PROVIDERS)},
     }
