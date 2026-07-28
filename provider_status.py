@@ -40,17 +40,34 @@ def check_azure_tts() -> dict:
         key = os.environ.get("AZURE_API_KEY")
         if not region or not key:
             return {"status": "not_configured"}
+        # An actual minimal synthesis call, not just voices/list -- that only
+        # confirms the key/region are valid, not that synthesis itself
+        # returns real audio (see check_gemini_tts's comment on why a
+        # "request didn't error" check isn't enough on its own).
+        ssml = (
+            '<speak version="1.0" xml:lang="si-LK">'
+            '<voice name="si-LK-ThiliniNeural">hi</voice></speak>'
+        ).encode()
         req = urllib.request.Request(
-            f"https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list",
-            headers={"Ocp-Apim-Subscription-Key": key},
+            f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1",
+            data=ssml,
+            headers={
+                "Ocp-Apim-Subscription-Key": key,
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3",
+            },
+            method="POST",
         )
         try:
             with urllib.request.urlopen(req, timeout=8) as resp:
-                return {"status": "ok" if resp.status == 200 else "error"}
+                audio = resp.read()
         except urllib.error.HTTPError as e:
             return {"status": "error", "detail": f"HTTP {e.code}"}
         except Exception as e:
             return {"status": "error", "detail": str(e)}
+        if not audio:
+            return {"status": "error", "detail": "200 OK but no audio data returned"}
+        return {"status": "ok"}
 
     return _cached("azure_tts", 30, compute)
 
@@ -127,8 +144,12 @@ def check_gemini_tts() -> dict:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=15):
-                return {"status": "ok", "_cache_seconds": 300}
+            # Timeout matches agent.py's TimeoutBoundGeminiTTS cutoff (12s), not
+            # a more lenient value -- a response that only completes at 14s
+            # would report "ok" here while the real agent pipeline would
+            # already have timed out and failed on that exact call.
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")
             if e.code == 429:
@@ -149,6 +170,19 @@ def check_gemini_tts() -> dict:
         except Exception as e:
             return {"status": "error", "detail": str(e), "_cache_seconds": 30}
 
+        # A 200 response with no actual audio in it is a real failure mode
+        # seen live (agent logs: "no audio frames were pushed for text: ...")
+        # -- checking the HTTP status alone missed this entirely, reporting
+        # "ready" while every real call was failing.
+        has_audio = any(
+            part.get("inlineData", {}).get("data")
+            for cand in data.get("candidates", [])
+            for part in cand.get("content", {}).get("parts", [])
+        )
+        if not has_audio:
+            return {"status": "error", "detail": "200 OK but no audio data returned", "_cache_seconds": 30}
+        return {"status": "ok", "_cache_seconds": 300}
+
     return _cached("gemini_tts", 300, compute)
 
 
@@ -165,12 +199,15 @@ def check_elevenlabs_tts() -> dict:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=15):
-                return {"status": "ok"}
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                audio = resp.read()
         except urllib.error.HTTPError as e:
             return {"status": "error", "detail": f"HTTP {e.code}"}
         except Exception as e:
             return {"status": "error", "detail": str(e)}
+        if not audio:
+            return {"status": "error", "detail": "200 OK but no audio data returned"}
+        return {"status": "ok"}
 
     # No punishing daily cap like Gemini's -- ElevenLabs bills against a
     # monthly character quota, so a short cache is just to avoid being
