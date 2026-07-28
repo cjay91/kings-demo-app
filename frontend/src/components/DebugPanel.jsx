@@ -32,9 +32,19 @@ function formatRetry(seconds) {
   return hrs > 0 ? ` (~${hrs}h${mins}m)` : ` (~${mins}m)`;
 }
 
-function StatusBadge({ entry }) {
+function StatusBadge({ entry, provider }) {
   if (!entry) return null;
-  const meta = STATUS_META[entry.status] ?? STATUS_META.error;
+  // Gemini's real failure modes (503, empty audio/text, an actual socket
+  // timeout) all read the same way to a caller -- it just didn't respond in
+  // time -- so collapse anything that isn't a clean "ready", "quota
+  // exceeded", or "not configured" into "timed out" rather than surfacing
+  // the underlying technical distinction here.
+  const isGemini = provider === "gemini";
+  const collapsedStatus =
+    isGemini && !["ok", "quota_exceeded", "not_configured"].includes(entry.status)
+      ? "timeout"
+      : entry.status;
+  const meta = STATUS_META[collapsedStatus] ?? STATUS_META.error;
   return (
     <span className={`debug-panel__badge debug-panel__badge--${meta.tone}`} title={entry.detail || ""}>
       {meta.text}
@@ -98,7 +108,7 @@ export function DebugPanel({
             </option>
           ))}
         </select>
-        <StatusBadge entry={status?.stt?.[sttProvider]} />
+        <StatusBadge entry={status?.stt?.[sttProvider]} provider={sttProvider} />
       </div>
 
       <div className="debug-panel__row">
@@ -115,7 +125,7 @@ export function DebugPanel({
             </option>
           ))}
         </select>
-        <StatusBadge entry={status?.tts?.[ttsProvider]} />
+        <StatusBadge entry={status?.tts?.[ttsProvider]} provider={ttsProvider} />
       </div>
 
       <div className="debug-panel__row">
@@ -127,7 +137,7 @@ export function DebugPanel({
             </option>
           ))}
         </select>
-        <StatusBadge entry={status?.llm?.[LLM_OPTIONS[0].value]} />
+        <StatusBadge entry={status?.llm?.[LLM_OPTIONS[0].value]} provider={LLM_OPTIONS[0].value} />
       </div>
 
       <button type="button" className="debug-panel__refresh" onClick={checkStatus} disabled={loading}>
