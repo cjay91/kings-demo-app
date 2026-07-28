@@ -24,6 +24,20 @@ import urllib.request
 _cache: dict[str, tuple[float, dict]] = {}
 
 
+def _is_timeout(e: Exception) -> bool:
+    """A urlopen() timeout can surface two different ways depending on
+    exactly when it fires -- confirmed by reproducing both live: a bare
+    TimeoutError if it happens mid-read (matches the real "The read
+    operation timed out" seen in production), or that same TimeoutError
+    wrapped inside a urllib.error.URLError if it happens during the TLS
+    handshake instead. Checking both, rather than just the bare case, so
+    neither is misreported as a generic "error"."""
+    if isinstance(e, TimeoutError):
+        return True
+    reason = getattr(e, "reason", None)
+    return isinstance(reason, TimeoutError)
+
+
 def _cached(key: str, ttl_seconds: float, compute_fn) -> dict:
     now = time.time()
     if key in _cache and _cache[key][0] > now:
@@ -64,7 +78,7 @@ def check_azure_tts() -> dict:
         except urllib.error.HTTPError as e:
             return {"status": "error", "detail": f"HTTP {e.code}"}
         except Exception as e:
-            return {"status": "error", "detail": str(e)}
+            return {"status": "timeout" if _is_timeout(e) else "error", "detail": str(e)}
         if not audio:
             return {"status": "error", "detail": "200 OK but no audio data returned"}
         return {"status": "ok"}
@@ -90,7 +104,7 @@ def check_azure_stt() -> dict:
         except urllib.error.HTTPError as e:
             return {"status": "error", "detail": f"HTTP {e.code}"}
         except Exception as e:
-            return {"status": "error", "detail": str(e)}
+            return {"status": "timeout" if _is_timeout(e) else "error", "detail": str(e)}
 
     return _cached("azure_stt", 30, compute)
 
@@ -115,7 +129,7 @@ def check_chirp_stt() -> dict:
             # permission specifically (that needs an actual recognize call,
             # which has a real cost) -- still catches the class of failure
             # already hit once (a valid-looking key with no API access).
-            return {"status": "error", "detail": str(e)[:200]}
+            return {"status": "timeout" if _is_timeout(e) else "error", "detail": str(e)[:200]}
 
     return _cached("chirp_stt", 60, compute)
 
@@ -168,7 +182,8 @@ def check_gemini_tts() -> dict:
                 }
             return {"status": "error", "detail": f"HTTP {e.code}", "_cache_seconds": 30}
         except Exception as e:
-            return {"status": "error", "detail": str(e), "_cache_seconds": 30}
+            status = "timeout" if _is_timeout(e) else "error"
+            return {"status": status, "detail": str(e), "_cache_seconds": 30}
 
         # A 200 response with no actual audio in it is a real failure mode
         # seen live (agent logs: "no audio frames were pushed for text: ...")
@@ -214,7 +229,7 @@ def check_elevenlabs_tts() -> dict:
         except urllib.error.HTTPError as e:
             return {"status": "error", "detail": f"HTTP {e.code}"}
         except Exception as e:
-            return {"status": "error", "detail": str(e)}
+            return {"status": "timeout" if _is_timeout(e) else "error", "detail": str(e)}
         if not audio:
             return {"status": "error", "detail": "200 OK but no audio data returned"}
         return {"status": "ok"}

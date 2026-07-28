@@ -15,6 +15,7 @@ const TTS_OPTIONS = [
 const STATUS_META = {
   ok: { text: "ready", tone: "ok" },
   quota_exceeded: { text: "quota exceeded", tone: "warn" },
+  timeout: { text: "timed out", tone: "error" },
   error: { text: "error", tone: "error" },
   not_configured: { text: "not configured", tone: "error" },
   unknown_provider: { text: "unknown", tone: "error" },
