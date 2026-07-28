@@ -181,9 +181,19 @@ def check_gemini_tts() -> dict:
         )
         if not has_audio:
             return {"status": "error", "detail": "200 OK but no audio data returned", "_cache_seconds": 30}
-        return {"status": "ok", "_cache_seconds": 300}
+        # Only 30s for a success too, not the original 300s -- confirmed live
+        # this session that Gemini can go from quota_exceeded to timing out
+        # to succeeding within the same hour, so caching a lucky "ok" for a
+        # full 5 minutes risked showing "ready" long after it had already
+        # failed again for real. 30s is still a tiny fraction of the 100/day
+        # cap since checks only happen on explicit user action (opening the
+        # panel or clicking recheck), not on a timer.
+        return {"status": "ok", "_cache_seconds": 30}
 
-    return _cached("gemini_tts", 300, compute)
+    # 30 here is just the fallback default -- every branch above sets its own
+    # explicit _cache_seconds, so this is never actually used, but kept
+    # consistent with them rather than the old (misleadingly unused) 300.
+    return _cached("gemini_tts", 30, compute)
 
 
 def check_elevenlabs_tts() -> dict:
