@@ -13,7 +13,6 @@ export function Header() {
         </span>
         <span className="header__name">King&rsquo;s Hospital</span>
       </div>
-      <span className="header__tag">Colombo</span>
     </header>
   );
 }

@@ -39,15 +39,6 @@
   letter-spacing: -0.01em;
 }
 
-.header__tag {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--teal-600);
-  background: var(--teal-100);
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-
 /* ---------- Hero ---------- */
 
 .hero {
@@ -351,7 +342,7 @@
 
 .debug-panel {
   position: fixed;
-  top: 88px;
+  top: 16px;
   right: 16px;
   z-index: 40;
   width: min(320px, 90vw);
