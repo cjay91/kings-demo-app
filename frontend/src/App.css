@@ -354,7 +354,7 @@
   top: 88px;
   right: 16px;
   z-index: 40;
-  width: min(260px, 80vw);
+  width: min(320px, 90vw);
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -374,8 +374,9 @@
 
 .debug-panel__row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   font-size: 0.85rem;
 }
 
@@ -386,8 +387,8 @@
 }
 
 .debug-panel__row select {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 90px;
+  min-width: 70px;
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
