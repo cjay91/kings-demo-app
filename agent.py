@@ -27,16 +27,30 @@ Provider selection (both STT and TTS) can be set two ways:
 
 Current defaults, confirmed via live TTS->STT roundtrip testing with real
 credentials:
-- STT: Azure Speech (si-LK) by default -- accepts the language and
-  transcribes real audio, though not perfectly (a synthetic-audio
-  roundtrip test produced 2 word-level misses out of ~7 words, including
-  one semantic miss -- worth judging against real speech, not just this
+- STT: Azure Speech by default, given ["si-LK", "en-US", "ta-IN"] rather
+  than a single locked language -- confirmed by reading the plugin's
+  source that >1 language switches on Azure's continuous language-ID
+  mode, and confirmed live that it matters: locking language="si-LK"
+  meant a caller speaking English or Tamil got transcribed as
+  confident-sounding Sinhala gibberish (0.60-0.69 confidence, no signal
+  anything was wrong), e.g. "I need to see a doctor tomorrow morning" ->
+  "අනික ඔබ ක්‍රීඩා කරපු නැටුම් ඕනි". With auto-detect on, the same
+  Sinhala/English/Tamil test sentences all came back correctly
+  attributed and transcribed. Sinhala-only accuracy itself still isn't
+  perfect (a synthetic-audio roundtrip test produced 2 word-level misses
+  out of ~7 words -- worth judging against real speech, not just this
   one data point). "chirp" (or "google") switches to Google Cloud
-  Speech-to-Text's chirp_2 model instead -- confirmed working via live
-  testing, same si-LK caveats apply, and a head-to-head comparison on the
-  same synthetic audio found Chirp dropped a specific detail (an
-  appointment time) that Azure preserved, though both got other words
-  wrong -- call it a mild edge for Azure, not a clean win. Needs
+  Speech-to-Text's chirp_2 model instead, Sinhala-only -- confirmed
+  working via live testing for si-LK, but does NOT get the same
+  multi-language treatment: Google's API rejects multi-language
+  recognition together with chirp_2 outright ("Multiple language
+  recognition is only available in ... eu, global, us"), and chirp_2
+  itself only exists in regional locations like us-central1, not
+  eu/global/us -- a genuine platform conflict, confirmed live, not
+  worked around here. A head-to-head si-LK-only comparison on the same
+  synthetic audio found Chirp dropped a specific detail (an appointment
+  time) that Azure preserved, though both got other words wrong -- call
+  it a mild edge for Azure, not a clean win. Chirp needs
   GOOGLE_SERVICE_ACCOUNT_JSON (see below); Azure doesn't.
 - LLM: Gemini 2.5 Flash as a plain text model -- no realtime/audio
   involved here, just normal chat completion + tool-calling.
@@ -102,6 +116,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
+from livekit.agents import tts as tts_module
 from livekit.agents.tts import FallbackAdapter
 from livekit.plugins import azure, elevenlabs, google
 from livekit.plugins.google.beta import GeminiTTS
@@ -162,7 +177,9 @@ SYSTEM_PROMPT = """
 සහ පෝලිම් අංකය (running number) පිළිබඳ තොරතුරු ලබා දීමට උපකාර කිරීමයි.
 
 මාර්ගෝපදේශ:
-- සෑම විටම සිංහලෙන් කෙටියෙන් හා පැහැදිලිව කතා කරන්න.
+- රෝගියා කතා කරන භාෂාවෙන්ම (සිංහල, ඉංග්‍රීසි, හෝ දෙමළ) කෙටියෙන් හා
+  පැහැදිලිව පිළිතුරු දෙන්න. රෝගියා සංවාදය අතරතුර භාෂාව මාරු කළහොත්,
+  ඔබත් එයටම මාරු වන්න.
 - වෛද්‍යවරයෙකු, විශේෂඥතාවයක්, හෝ දිනයක් ගැන විමසන විට, සුදුසු මෙවලම
   (tool) එක භාවිතා කර සැබෑ දත්ත පරීක්ෂා කරන්න - කිසි විටෙකත් තොරතුරු
   මවා නොපවසන්න.
@@ -201,7 +218,29 @@ def build_stt(provider: str):
     Speech-to-Text's chirp_2 model; anything else defaults to Azure.
     location="us-central1" is required -- chirp models aren't available
     in "global", and chirp_3 (tried first, before chirp_2) explicitly
-    rejects si-LK as unsupported."""
+    rejects si-LK as unsupported.
+
+    Azure gets a LIST of languages, not a single one -- passing multiple
+    candidates to livekit-plugins-azure switches on Azure's continuous
+    language-ID mode (confirmed by reading the plugin's source: >1
+    language enables auto_detect_source_language_config), which actually
+    figures out which language is being spoken per utterance rather than
+    forcing every sound into Sinhala phonetics. This was a real, tested
+    problem before: locking language="si-LK" meant a caller speaking
+    English or Tamil got transcribed as confident-sounding Sinhala
+    gibberish with no signal anything was wrong (e.g. "I need to see a
+    doctor tomorrow morning" -> "අනික ඔබ ක්‍රීඩා කරපු නැටුම් ඕනි", a
+    0.60-confidence non-answer). With auto-detect on, the same three
+    sentences (Sinhala/English/Tamil) all came back correctly attributed
+    and transcribed in live testing.
+
+    Chirp does NOT get the same treatment -- verified live that it can't:
+    Google's API explicitly rejects multi-language recognition together
+    with chirp_2 ("Multiple language recognition is only available in
+    the following locations: eu, global, us"), and chirp_2 itself only
+    exists in regional locations like us-central1, not eu/global/us. A
+    genuine platform conflict, not something worth working around here;
+    Chirp stays Sinhala-only."""
     if provider in ("chirp", "google"):
         return google.STT(
             languages="si-LK",
@@ -213,13 +252,86 @@ def build_stt(provider: str):
     return azure.STT(
         speech_key=os.environ["AZURE_API_KEY"],
         speech_region=os.environ["AZURE_REGION"],
-        language="si-LK",
+        language=["si-LK", "en-US", "ta-IN"],
     )
 
 
+def _detect_script(text: str) -> str:
+    """Dominant-script detection via plain Unicode ranges -- Sinhala
+    (U+0D80-U+0DFF), Tamil (U+0B80-U+0BFF), and Latin/English occupy
+    distinct, non-overlapping blocks, so counting characters per range is
+    a fast, reliable way to tell them apart without a real language-ID
+    library. Only needs to be "good enough" here: it picks which single
+    Azure voice speaks a given line, and the LLM only replies in one
+    language per turn (see SYSTEM_PROMPT's language-mirroring
+    instruction), so a whole utterance is expected to be one script."""
+    counts = {"si": 0, "ta": 0, "en": 0}
+    for ch in text:
+        cp = ord(ch)
+        if 0x0D80 <= cp <= 0x0DFF:
+            counts["si"] += 1
+        elif 0x0B80 <= cp <= 0x0BFF:
+            counts["ta"] += 1
+        elif ch.isalpha() and cp < 128:
+            counts["en"] += 1
+    if not any(counts.values()):
+        return "si"
+    return max(counts, key=counts.get)
+
+
+class MultilingualAzureTTS(tts_module.TTS):
+    """Routes each synthesize() call to a different underlying azure.TTS
+    instance based on the dominant script in the text -- lets the agent
+    actually speak back in whichever language the caller used. Azure's
+    neural voices are each tied to a single locale/persona (confirmed:
+    si-LK-ThiliniNeural isn't a general multilingual voice), so there's
+    no single instance that can be told "say this in Tamil this time" --
+    each language needs its own pre-built azure.TTS, and this class picks
+    between them per call instead of the agent being stuck with whichever
+    one it was constructed with."""
+
+    def __init__(self, *, speech_key: str, speech_region: str) -> None:
+        super().__init__(
+            capabilities=tts_module.TTSCapabilities(streaming=False),
+            sample_rate=24000,
+            num_channels=1,
+        )
+        self._voices = {
+            "si": azure.TTS(
+                voice="si-LK-ThiliniNeural",
+                language="si-LK",
+                speech_key=speech_key,
+                speech_region=speech_region,
+            ),
+            "en": azure.TTS(
+                voice="en-US-JennyNeural",
+                language="en-US",
+                speech_key=speech_key,
+                speech_region=speech_region,
+            ),
+            "ta": azure.TTS(
+                voice="ta-IN-PallaviNeural",
+                language="ta-IN",
+                speech_key=speech_key,
+                speech_region=speech_region,
+            ),
+        }
+
+    def synthesize(
+        self, text: str, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
+    ) -> tts_module.ChunkedStream:
+        return self._voices[_detect_script(text)].synthesize(text, conn_options=conn_options)
+
+
 def build_tts(provider: str):
-    """provider="azure" switches to Azure's si-LK-ThiliniNeural voice
-    (fast, reliable, weaker Sinhala voice quality per live testing);
+    """provider="azure" -> MultilingualAzureTTS, which picks between three
+    pre-built Azure voices (si-LK/en-US/ta-IN) per response based on the
+    detected script -- matches build_stt()'s Azure STT now understanding
+    all three languages, so the agent can actually answer back in
+    whichever one the caller used, not just transcribe it and then
+    respond in Sinhala regardless. Weaker Sinhala voice quality than
+    Gemini per live testing, but fast and reliable.
+
     provider="elevenlabs" -- added as a comparison option for the debug
     panel despite testing badly: ElevenLabs' TTS API rejects an explicit
     si language code on every model (400 unsupported_language), and even
@@ -231,11 +343,12 @@ def build_tts(provider: str):
     intentionally-bad option so it can be heard/compared directly rather
     than taken on faith; anything else (including unset) defaults to the
     Gemini TTS cascade (better voice quality, but subject to the preview
-    models' quota/latency issues -- see TimeoutBoundGeminiTTS above)."""
+    models' quota/latency issues -- see TimeoutBoundGeminiTTS above).
+    Gemini/ElevenLabs aren't given the same three-way voice routing as
+    Azure -- unverified whether they even need it (both claim broader
+    multilingual capability by default), and out of scope for now."""
     if provider == "azure":
-        return azure.TTS(
-            voice="si-LK-ThiliniNeural",
-            language="si-LK",
+        return MultilingualAzureTTS(
             speech_key=os.environ["AZURE_API_KEY"],
             speech_region=os.environ["AZURE_REGION"],
         )
